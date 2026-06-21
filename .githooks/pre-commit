@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=== Pre-commit: gitleaks ==="
+
+if command -v gitleaks >/dev/null 2>&1; then
+  echo ">> gitleaks protect --staged -c .gitleaks.toml"
+  if ! gitleaks protect --staged -c .gitleaks.toml; then
+    echo "FAIL: gitleaks detected secrets"
+    exit 1
+  fi
+else
+  echo "WARNING: gitleaks not installed — skipping secret scan"
+fi
+
+echo "=== Pre-commit PASSED ==="

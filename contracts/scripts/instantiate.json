@@ -1,0 +1,30 @@
+{
+  "mainnet": {
+    "chain_id": "columbus-5",
+    "rpc": "https://terra-classic-rpc.publicnode.com:443",
+    "lcd": "https://terra-classic-lcd.publicnode.com",
+    "cl8y_token": "terra16wtml2q66g82fdkx66tap0qjkahqwp4lwq3ngtygacg5q0kzycgqvhpax3",
+    "usdc_denom": "ibc/0BB9D8513E8E8E9AE6A9D211D9136E6DA42288DDE6CFAA453A150A4566054DC5",
+    "instantiate": {
+      "owner": "terra1xsecn4snv94ezcez0z3vq8an9j4h4kxxcydp8l",
+      "cl8y_token": "terra16wtml2q66g82fdkx66tap0qjkahqwp4lwq3ngtygacg5q0kzycgqvhpax3",
+      "usdc_denom": "ibc/0BB9D8513E8E8E9AE6A9D211D9136E6DA42288DDE6CFAA453A150A4566054DC5",
+      "destination": "terra1...",
+      "price": "700000"
+    }
+  },
+  "testnet": {
+    "chain_id": "rebel-2",
+    "rpc": "https://terra-classic-testnet-rpc.publicnode.com:443",
+    "lcd": "https://lcd.luncblaze.com",
+    "cl8y_token": "",
+    "usdc_denom": "ibc/0BB9D8513E8E8E9AE6A9D211D9136E6DA42288DDE6CFAA453A150A4566054DC5",
+    "instantiate": {
+      "owner": "terra1xsecn4snv94ezcez0z3vq8an9j4h4kxxcydp8l",
+      "cl8y_token": "",
+      "usdc_denom": "ibc/0BB9D8513E8E8E9AE6A9D211D9136E6DA42288DDE6CFAA453A150A4566054DC5",
+      "destination": "terra1...",
+      "price": "700000"
+    }
+  }
+}
