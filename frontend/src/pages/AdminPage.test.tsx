@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AdminPage } from '../pages/AdminPage';
 import { useWalletStore } from '../stores/wallet';
+import { MAINNET_OTC_CONTRACT } from '../utils/constants';
 
 vi.mock('../services/contract', () => ({
   contractService: {
@@ -66,6 +67,26 @@ describe('AdminPage', () => {
     renderAdmin();
     await waitFor(() => {
       expect(screen.getByText(/Owner Admin/i)).toBeInTheDocument();
+    });
+  });
+
+  it('shows CL8Y deposit address with copy', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    useWalletStore.setState({
+      connected: true,
+      address: 'terra1mockowner000000000000000000000000',
+    });
+    renderAdmin();
+    await waitFor(() => {
+      expect(screen.getByText(/Send CL8Y to this address/i)).toBeInTheDocument();
+    });
+    const addressButton = screen.getByRole('button', { name: MAINNET_OTC_CONTRACT });
+    fireEvent.click(addressButton);
+    expect(writeText).toHaveBeenCalledWith(MAINNET_OTC_CONTRACT);
+    await waitFor(() => {
+      expect(screen.getByText(/Copied!/i)).toBeInTheDocument();
     });
   });
 });

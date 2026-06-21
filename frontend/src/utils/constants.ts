@@ -57,6 +57,14 @@ export const TOKENS = {
   },
 } as const;
 
+/** Vyntrex market pages on Terra Classic */
+export const VYNTREX_MARKET_URLS = {
+  usdc:
+    'https://vyntrex.io/market/columbus-5/terra1vnt3tjg0v98hgp0vx8nynvklnjqzkzsqvtpzv9v56r800gdhmxwstv5y64',
+  cl8y:
+    'https://vyntrex.io/market/columbus-5/terra1kkrwna59jzpvsp7n4l3xdt72rmejcz5d2xaezxl29zvkssn7vvtqmtmemv',
+} as const;
+
 /** Mainnet OTC contract (code ID 11448) */
 export const MAINNET_OTC_CONTRACT =
   'terra1e6cuvl55gyfn4yqavcar39v9g4y75mt6dvpw4c6u68rkvz9jkrmq59xedp';

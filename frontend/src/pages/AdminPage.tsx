@@ -3,8 +3,8 @@ import { useWallet } from '../hooks/useWallet';
 import { useOtcConfig, useUpdateRate, useUpdateDestination } from '../hooks/useContract';
 import { isOwnerWallet, priceToUsdcDisplay } from '../utils/swap';
 import { parseAmount } from '../utils/format';
-import { TOKENS } from '../utils/constants';
-import { Card, CardContent, Button } from '../components/common';
+import { CONTRACTS, DEFAULT_NETWORK, TOKENS } from '../utils/constants';
+import { Card, CardContent, Button, CopyableAddress } from '../components/common';
 
 export function AdminPage() {
   const { connected, address } = useWallet();
@@ -67,9 +67,23 @@ export function AdminPage() {
     }
   };
 
+  const otcAddress = CONTRACTS[DEFAULT_NETWORK].otc;
+
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold text-white text-center">Owner Admin</h2>
+
+      <Card>
+        <CardContent className="space-y-2">
+          <CopyableAddress
+            label="Send CL8Y to this address"
+            address={otcAddress}
+          />
+          <p className="text-xs text-gray-500">
+            Transfer CL8Y CW20 tokens to the OTC contract to fund swap inventory.
+          </p>
+        </CardContent>
+      </Card>
 
       <Card variant="highlight">
         <CardContent className="space-y-4">
