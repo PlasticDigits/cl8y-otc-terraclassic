@@ -5,15 +5,18 @@ import { useOtcCl8yBalance, useOtcConfig, useSwap } from '../../hooks/useContrac
 import { formatAmount, parseAmount } from '../../utils/format';
 import { computeCl8yOut, priceToUsdcDisplay, cl8yPerUsdc } from '../../utils/swap';
 import { TOKENS } from '../../utils/constants';
+import { useBuyHistoryStore } from '../../stores/buyHistory';
+import { SwapSuccessPopover } from './SwapSuccessPopover';
 
 export function SwapCard() {
-  const { connected, usdcBalance, refreshBalances } = useWallet();
+  const { connected, address, usdcBalance, refreshBalances } = useWallet();
   const { data: config } = useOtcConfig();
   const { data: otcCl8yBalance } = useOtcCl8yBalance();
   const swap = useSwap();
+  const addBuy = useBuyHistoryStore((s) => s.addBuy);
 
   const [usdcInput, setUsdcInput] = useState('');
-  const [txHash, setTxHash] = useState<string | null>(null);
+  const [successCl8yAmount, setSuccessCl8yAmount] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const price = config?.price || '700000';
@@ -28,10 +31,14 @@ export function SwapCard() {
 
   const handleSwap = async () => {
     setError(null);
-    setTxHash(null);
+    setSuccessCl8yAmount(null);
+    const boughtCl8y = formatAmount(cl8yOut, TOKENS.cl8y.decimals, 2);
     try {
       const result = await swap.mutateAsync(usdcMicro);
-      setTxHash(result.txHash);
+      setSuccessCl8yAmount(boughtCl8y);
+      if (address) {
+        addBuy({ txHash: result.txHash, cl8yAmount: boughtCl8y, walletAddress: address });
+      }
       setUsdcInput('');
       await refreshBalances();
     } catch (e) {
@@ -40,8 +47,15 @@ export function SwapCard() {
   };
 
   return (
-    <Card variant="highlight" className="animate-fade-in-up">
-      <CardContent className="space-y-4">
+    <>
+      {successCl8yAmount && (
+        <SwapSuccessPopover
+          cl8yAmount={successCl8yAmount}
+          onClose={() => setSuccessCl8yAmount(null)}
+        />
+      )}
+      <Card variant="highlight" className="animate-fade-in-up">
+        <CardContent className="space-y-4">
         <div className="text-center space-y-1">
           <p className="text-sm text-gray-400">Rate</p>
           <p className="text-xl font-mono-numbers text-amber-400">
@@ -107,10 +121,8 @@ export function SwapCard() {
         )}
 
         {error && <p className="text-red-400 text-sm text-center">{error}</p>}
-        {txHash && (
-          <p className="text-green-400 text-sm text-center break-all">Success: {txHash}</p>
-        )}
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </>
   );
 }

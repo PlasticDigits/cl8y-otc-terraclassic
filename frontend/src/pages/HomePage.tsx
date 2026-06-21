@@ -1,4 +1,5 @@
 import { BalanceCards } from '../components/swap/BalanceCards';
+import { BuyHistory } from '../components/swap/BuyHistory';
 import { SwapCard } from '../components/swap/SwapCard';
 
 export function HomePage() {
@@ -6,6 +7,7 @@ export function HomePage() {
     <div>
       <BalanceCards />
       <SwapCard />
+      <BuyHistory />
     </div>
   );
 }

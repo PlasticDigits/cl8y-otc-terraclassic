@@ -77,7 +77,7 @@ export const CONTRACTS = {
     otc:
       import.meta.env.VITE_OTC_CONTRACT ||
       import.meta.env.VITE_OTC_CONTRACT_MAINNET ||
-      MAINNET_OTC_CONTRACT,
+      (import.meta.env.VITE_DEV_MODE === 'true' ? '' : MAINNET_OTC_CONTRACT),
   },
 } as const;
 

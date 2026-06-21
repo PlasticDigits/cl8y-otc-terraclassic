@@ -10,7 +10,7 @@ export default defineConfig({
   },
   webServer: {
     command:
-      'VITE_DEV_MODE=true VITE_MOCK_OWNER=terra1mockowner000000000000000000000000 npm run dev',
+      'VITE_DEV_MODE=true VITE_MOCK_OWNER=terra1mockowner000000000000000000000000 VITE_OTC_CONTRACT= VITE_OTC_CONTRACT_MAINNET= npm run dev',
     url: 'http://localhost:5173',
     reuseExistingServer: !process.env.CI,
   },
