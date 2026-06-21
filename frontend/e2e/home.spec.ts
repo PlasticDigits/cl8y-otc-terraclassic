@@ -7,6 +7,7 @@ test.describe('Homepage', () => {
     await expect(page.getByText(/1 CL8Y =/i)).toBeVisible();
     await expect(page.getByText('You pay')).toBeVisible();
     await expect(page.getByText('You receive')).toBeVisible();
+    await expect(page.getByText(/^Max:/)).toBeVisible();
     await expect(page.getByRole('button', { name: 'OTC SWAP' })).toBeVisible();
   });
 

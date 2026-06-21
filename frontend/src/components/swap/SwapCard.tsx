@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Card, CardContent, Button } from '../common';
 import { useWallet } from '../../hooks/useWallet';
-import { useOtcConfig, useSwap } from '../../hooks/useContract';
+import { useOtcCl8yBalance, useOtcConfig, useSwap } from '../../hooks/useContract';
 import { formatAmount, parseAmount } from '../../utils/format';
 import { computeCl8yOut, priceToUsdcDisplay, cl8yPerUsdc } from '../../utils/swap';
 import { TOKENS } from '../../utils/constants';
@@ -9,6 +9,7 @@ import { TOKENS } from '../../utils/constants';
 export function SwapCard() {
   const { connected, usdcBalance, refreshBalances } = useWallet();
   const { data: config } = useOtcConfig();
+  const { data: otcCl8yBalance } = useOtcCl8yBalance();
   const swap = useSwap();
 
   const [usdcInput, setUsdcInput] = useState('');
@@ -85,6 +86,9 @@ export function SwapCard() {
               </span>
               <span className="text-amber-400 font-semibold ml-2">CL8Y</span>
             </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Max: {formatAmount(otcCl8yBalance ?? '0', TOKENS.cl8y.decimals, 6)}
+            </p>
           </label>
         </div>
 

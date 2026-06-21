@@ -10,6 +10,14 @@ export function useOtcConfig() {
   });
 }
 
+export function useOtcCl8yBalance() {
+  return useQuery({
+    queryKey: ['otc', 'cl8yBalance'],
+    queryFn: () => contractService.getOtcCl8yBalance(),
+    refetchInterval: POLLING_INTERVAL,
+  });
+}
+
 export function useSimulateSwap(usdcInMicro: string) {
   return useQuery({
     queryKey: ['otc', 'simulate', usdcInMicro],

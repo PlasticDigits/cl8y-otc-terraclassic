@@ -119,6 +119,13 @@ class ContractService {
     return res.balance;
   }
 
+  async getOtcCl8yBalance(): Promise<string> {
+    const otcAddress = this.getOtcAddress();
+    if (!otcAddress) return '0';
+    const config = await this.getConfig();
+    return this.getCw20Balance(config.cl8y_token, otcAddress);
+  }
+
   async executeSwap(usdcAmountMicro: string): Promise<{ txHash: string }> {
     if (DEV_MODE && !this.getOtcAddress()) {
       return { txHash: 'MOCK_TX_HASH' };
