@@ -1,5 +1,6 @@
 /**
  * Terra Classic wallet integration using cosmes
+ * Supports: Station, Keplr, LUNC Dash, Galaxy Station, Leap, Cosmostation
  */
 import {
   ConnectedWallet,
@@ -24,17 +25,24 @@ const SWAP_GAS_LIMIT = 500000;
 const networkConfig = NETWORKS[DEFAULT_NETWORK];
 const TERRA_CLASSIC_CHAIN_ID = networkConfig.chainId;
 const TERRA_RPC_URL = networkConfig.rpc;
-const WC_PROJECT_ID = '2ce7811b869be33ffad28cff05c93c15';
+const WC_PROJECT_ID = '2ce7811b869be33ffad28cff05c93c15'; // Public WalletConnect project ID
 
 const GAS_PRICE = { amount: '28.325', denom: 'uluna' };
 
+const STATION_CONTROLLER = new StationController();
+const KEPLR_CONTROLLER = new KeplrController(WC_PROJECT_ID);
+const LUNCDASH_CONTROLLER = new LUNCDashController();
+const GALAXY_CONTROLLER = new GalaxyStationController(WC_PROJECT_ID);
+const LEAP_CONTROLLER = new LeapController(WC_PROJECT_ID);
+const COSMOSTATION_CONTROLLER = new CosmostationController(WC_PROJECT_ID);
+
 const CONTROLLERS: Partial<Record<WalletName, WalletController>> = {
-  [WalletName.STATION]: new StationController(),
-  [WalletName.KEPLR]: new KeplrController(WC_PROJECT_ID),
-  [WalletName.LUNCDASH]: new LUNCDashController(),
-  [WalletName.GALAXYSTATION]: new GalaxyStationController(WC_PROJECT_ID),
-  [WalletName.LEAP]: new LeapController(WC_PROJECT_ID),
-  [WalletName.COSMOSTATION]: new CosmostationController(WC_PROJECT_ID),
+  [WalletName.STATION]: STATION_CONTROLLER,
+  [WalletName.KEPLR]: KEPLR_CONTROLLER,
+  [WalletName.LUNCDASH]: LUNCDASH_CONTROLLER,
+  [WalletName.GALAXYSTATION]: GALAXY_CONTROLLER,
+  [WalletName.LEAP]: LEAP_CONTROLLER,
+  [WalletName.COSMOSTATION]: COSMOSTATION_CONTROLLER,
 };
 
 const connectedWallets: Map<string, ConnectedWallet> = new Map();
@@ -62,6 +70,68 @@ export function isCosmostationInstalled(): boolean {
   return typeof window !== 'undefined' && !!window.cosmostation;
 }
 
+async function suggestTerraClassicChain(walletName: WalletName): Promise<void> {
+  const supportedWallets: Set<WalletName> = new Set([
+    WalletName.STATION,
+    WalletName.KEPLR,
+    WalletName.LEAP,
+    WalletName.COSMOSTATION,
+  ]);
+  if (!supportedWallets.has(walletName)) return;
+
+  const config = NETWORKS[DEFAULT_NETWORK];
+  const chainInfo = {
+    chainId: config.chainId,
+    chainName: config.name,
+    rpc: config.rpc,
+    rest: config.lcd,
+    bip44: { coinType: 330 },
+    bech32Config: {
+      bech32PrefixAccAddr: 'terra',
+      bech32PrefixAccPub: 'terrapub',
+      bech32PrefixValAddr: 'terravaloper',
+      bech32PrefixValPub: 'terravaloperpub',
+      bech32PrefixConsAddr: 'terravalcons',
+      bech32PrefixConsPub: 'terravalconspub',
+    },
+    currencies: [
+      { coinDenom: 'LUNC', coinMinimalDenom: 'uluna', coinDecimals: 6 },
+      { coinDenom: 'USTC', coinMinimalDenom: 'uusd', coinDecimals: 6 },
+    ],
+    feeCurrencies: [
+      {
+        coinDenom: 'LUNC',
+        coinMinimalDenom: 'uluna',
+        coinDecimals: 6,
+        gasPriceStep: { low: 28.325, average: 28.325, high: 50 },
+      },
+    ],
+    stakeCurrency: { coinDenom: 'LUNC', coinMinimalDenom: 'uluna', coinDecimals: 6 },
+  };
+
+  type WalletExt = { experimentalSuggestChain?: (info: unknown) => Promise<void> };
+  type StationExt = { keplr?: WalletExt };
+
+  let ext: WalletExt | undefined;
+  if (walletName === WalletName.STATION) {
+    ext = (window.station as StationExt | undefined)?.keplr as WalletExt | undefined;
+  } else if (walletName === WalletName.KEPLR) {
+    ext = window.keplr as WalletExt | undefined;
+  } else if (walletName === WalletName.LEAP) {
+    ext = window.leap as WalletExt | undefined;
+  } else if (walletName === WalletName.COSMOSTATION) {
+    ext = window.cosmostation?.providers?.keplr as WalletExt | undefined;
+  }
+
+  if (!ext?.experimentalSuggestChain) return;
+
+  try {
+    await ext.experimentalSuggestChain(chainInfo);
+  } catch (err) {
+    console.warn(`[Wallet] experimentalSuggestChain failed for ${walletName}:`, err);
+  }
+}
+
 export async function connectTerraWallet(
   walletName: WalletName = WalletName.STATION,
   walletType: WalletType = WalletType.EXTENSION
@@ -69,27 +139,79 @@ export async function connectTerraWallet(
   const controller = CONTROLLERS[walletName];
   if (!controller) throw new Error(`Unsupported wallet: ${walletName}`);
 
-  const chainInfo = getChainInfo();
-  const wallets = await controller.connect(walletType, [chainInfo]);
-  const wallet = wallets.get(TERRA_CLASSIC_CHAIN_ID);
-  if (!wallet) throw new Error(`Failed to connect to ${TERRA_CLASSIC_CHAIN_ID}`);
+  try {
+    const chainInfo = getChainInfo();
 
-  connectedWallets.set(TERRA_CLASSIC_CHAIN_ID, wallet);
+    if (walletType === WalletType.EXTENSION) {
+      await suggestTerraClassicChain(walletName);
+    }
 
-  const walletTypeMap: Partial<Record<WalletName, TerraWalletType>> = {
-    [WalletName.STATION]: 'station',
-    [WalletName.KEPLR]: 'keplr',
-    [WalletName.LUNCDASH]: 'luncdash',
-    [WalletName.GALAXYSTATION]: 'galaxy',
-    [WalletName.LEAP]: 'leap',
-    [WalletName.COSMOSTATION]: 'cosmostation',
-  };
+    const wallets = await controller.connect(walletType, [chainInfo]);
 
-  return {
-    address: wallet.address,
-    walletType: walletTypeMap[walletName] || 'station',
-    connectionType: walletType,
-  };
+    if (wallets.size === 0) {
+      if (walletType === WalletType.WALLETCONNECT) {
+        throw new Error(
+          'WalletConnect connection failed. The wallet may be connected but unable to verify. ' +
+          'Please try disconnecting and reconnecting.'
+        );
+      }
+      throw new Error(
+        `${walletName} could not connect to Terra Classic (${chainInfo.chainId}). ` +
+        'The wallet may not support this chain. Try updating your wallet extension.'
+      );
+    }
+
+    const wallet = wallets.get(TERRA_CLASSIC_CHAIN_ID);
+    if (!wallet) {
+      throw new Error(`Failed to connect to Terra Classic chain (${TERRA_CLASSIC_CHAIN_ID})`);
+    }
+
+    connectedWallets.set(TERRA_CLASSIC_CHAIN_ID, wallet);
+
+    const walletTypeMap: Partial<Record<WalletName, TerraWalletType>> = {
+      [WalletName.STATION]: 'station',
+      [WalletName.KEPLR]: 'keplr',
+      [WalletName.LUNCDASH]: 'luncdash',
+      [WalletName.GALAXYSTATION]: 'galaxy',
+      [WalletName.LEAP]: 'leap',
+      [WalletName.COSMOSTATION]: 'cosmostation',
+    };
+
+    return {
+      address: wallet.address,
+      walletType: walletTypeMap[walletName] || 'station',
+      connectionType: walletType,
+    };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+    if (walletName === WalletName.KEPLR) {
+      if (errorMessage.includes('not installed') || errorMessage.includes('Keplr')) {
+        throw new Error('Keplr wallet is not installed. Please install the Keplr extension.');
+      }
+    }
+
+    if (walletName === WalletName.STATION) {
+      if (errorMessage.includes('not installed') || errorMessage.includes('Station')) {
+        throw new Error('Station wallet is not installed. Please install the Station extension.');
+      }
+    }
+
+    if (errorMessage.includes('User rejected') || errorMessage.includes('rejected')) {
+      throw new Error('Connection rejected by user');
+    }
+
+    const displayNames: Partial<Record<WalletName, string>> = {
+      [WalletName.STATION]: 'Station',
+      [WalletName.KEPLR]: 'Keplr',
+      [WalletName.LUNCDASH]: 'LUNC Dash',
+      [WalletName.GALAXYSTATION]: 'Galaxy Station',
+      [WalletName.LEAP]: 'Leap',
+      [WalletName.COSMOSTATION]: 'Cosmostation',
+    };
+
+    throw new Error(`Failed to connect ${displayNames[walletName] || 'wallet'}: ${errorMessage}`);
+  }
 }
 
 export async function disconnectTerraWallet(): Promise<void> {
@@ -142,9 +264,29 @@ export async function executeContractWithCoins(
 
 declare global {
   interface Window {
-    station?: unknown;
-    keplr?: unknown;
-    leap?: unknown;
-    cosmostation?: { providers: { keplr: unknown } };
+    station?: {
+      connect: () => Promise<void>;
+      disconnect: () => Promise<void>;
+      keplr?: {
+        enable: (chainId: string) => Promise<void>;
+        getOfflineSigner: (chainId: string) => unknown;
+        experimentalSuggestChain?: (chainInfo: unknown) => Promise<void>;
+      };
+    };
+    keplr?: {
+      enable: (chainId: string) => Promise<void>;
+      getOfflineSigner: (chainId: string) => unknown;
+      experimentalSuggestChain?: (chainInfo: unknown) => Promise<void>;
+    };
+    leap?: {
+      enable: (chainId: string) => Promise<void>;
+      getOfflineSigner: (chainId: string) => unknown;
+      experimentalSuggestChain?: (chainInfo: unknown) => Promise<void>;
+    };
+    cosmostation?: {
+      providers: {
+        keplr: unknown;
+      };
+    };
   }
 }

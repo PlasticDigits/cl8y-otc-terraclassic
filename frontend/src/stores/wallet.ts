@@ -62,7 +62,9 @@ export const useWalletStore = create<WalletState>()(
         set({ connecting: true, connectingWallet: walletName });
         try {
           const effectiveType =
-            walletName === WalletName.LUNCDASH ? WalletType.WALLETCONNECT : walletTypeParam;
+            walletName === WalletName.LUNCDASH || walletName === WalletName.GALAXYSTATION
+              ? WalletType.WALLETCONNECT
+              : walletTypeParam;
           const result = await connectTerraWallet(walletName, effectiveType);
           set({
             connected: true,
