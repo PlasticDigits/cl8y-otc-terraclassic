@@ -7,7 +7,7 @@ cd contracts
 docker run --rm -v "$(pwd)":/code \
   --mount type=volume,source=cl8y_otc_cache,target=/code/target \
   --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
-  cosmwasm/optimizer:0.15.0
+  cosmwasm/optimizer:0.17.0
 ```
 
 Output: `artifacts/cl8y_otc.wasm`

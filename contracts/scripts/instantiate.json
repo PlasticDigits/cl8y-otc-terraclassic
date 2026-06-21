@@ -9,7 +9,7 @@
       "owner": "terra1xsecn4snv94ezcez0z3vq8an9j4h4kxxcydp8l",
       "cl8y_token": "terra16wtml2q66g82fdkx66tap0qjkahqwp4lwq3ngtygacg5q0kzycgqvhpax3",
       "usdc_denom": "ibc/0BB9D8513E8E8E9AE6A9D211D9136E6DA42288DDE6CFAA453A150A4566054DC5",
-      "destination": "terra1...",
+      "destination": "terra13evv7q05sfxtdf0jn7lz032mjyprknrwxrzj36",
       "price": "700000"
     }
   },
@@ -23,7 +23,7 @@
       "owner": "terra1xsecn4snv94ezcez0z3vq8an9j4h4kxxcydp8l",
       "cl8y_token": "",
       "usdc_denom": "ibc/0BB9D8513E8E8E9AE6A9D211D9136E6DA42288DDE6CFAA453A150A4566054DC5",
-      "destination": "terra1...",
+      "destination": "terra13evv7q05sfxtdf0jn7lz032mjyprknrwxrzj36",
       "price": "700000"
     }
   }

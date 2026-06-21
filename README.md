@@ -21,3 +21,10 @@ cd frontend && npm install && npm run dev
 ```
 
 See [`docs/README.md`](docs/README.md) for full documentation.
+
+## Deployed contracts
+
+| Network | Chain ID | Code ID | OTC contract |
+|---------|----------|---------|--------------|
+| Mainnet | `columbus-5` | `11448` | [`terra1e6cuvl55gyfn4yqavcar39v9g4y75mt6dvpw4c6u68rkvz9jkrmq59xedp`](https://finder.terraclassic.community/columbus-5/address/terra1e6cuvl55gyfn4yqavcar39v9g4y75mt6dvpw4c6u68rkvz9jkrmq59xedp) |
+| Testnet | `rebel-2` | — | Not deployed |

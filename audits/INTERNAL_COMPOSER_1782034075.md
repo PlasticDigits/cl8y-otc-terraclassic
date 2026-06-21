@@ -517,7 +517,7 @@ The frontend is **not a security boundary**. All authorization is enforced on-ch
 | `@goblinhunt/cosmes` | ^0.0.71-ghunt.18 | **Fork** — review fork delta vs upstream |
 | `vite` / `react` | ^5.0.8 / ^18.2.0 | Standard; run `npm audit` regularly |
 
-WASM build: `cosmwasm/optimizer:0.15.0` — verify checksum matches deployed code.
+WASM build: `cosmwasm/optimizer:0.17.0` — verify checksum matches deployed code.
 
 ---
 

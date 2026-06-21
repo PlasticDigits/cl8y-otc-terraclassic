@@ -57,6 +57,10 @@ export const TOKENS = {
   },
 } as const;
 
+/** Mainnet OTC contract (code ID 11448) */
+export const MAINNET_OTC_CONTRACT =
+  'terra1e6cuvl55gyfn4yqavcar39v9g4y75mt6dvpw4c6u68rkvz9jkrmq59xedp';
+
 export const CONTRACTS = {
   testnet: {
     otc: import.meta.env.VITE_OTC_CONTRACT_TESTNET || '',
@@ -65,7 +69,7 @@ export const CONTRACTS = {
     otc:
       import.meta.env.VITE_OTC_CONTRACT ||
       import.meta.env.VITE_OTC_CONTRACT_MAINNET ||
-      '',
+      MAINNET_OTC_CONTRACT,
   },
 } as const;
 
