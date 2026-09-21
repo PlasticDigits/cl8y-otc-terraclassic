@@ -2,6 +2,11 @@
 
 Trusted-owner OTC swap on Terra Classic: users pay Noble USDC (IBC) and receive CL8Y CW20 at an owner-set price.
 
+Merge to `main` is **H3**: pull request, Woodpecker context
+`ci/woodpecker/pr/woodpecker`, and SHA-pinned merge — not CODEOWNERS
+review. See [`docs/architecture.md`](docs/architecture.md) and
+[ADR 0001](docs/adr/0001-remove-catchall-codeowners.md).
+
 ## Structure
 
 | Folder | Description |
