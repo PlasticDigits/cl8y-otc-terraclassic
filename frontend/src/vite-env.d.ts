@@ -6,6 +6,7 @@ interface ImportMetaEnv {
   readonly VITE_OTC_CONTRACT_MAINNET: string;
   readonly VITE_OTC_CONTRACT_TESTNET: string;
   readonly VITE_CL8Y_TOKEN: string;
+  readonly VITE_USDT_TOKEN: string;
   readonly VITE_MOCK_OWNER: string;
 }
 

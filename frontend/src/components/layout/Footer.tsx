@@ -1,4 +1,4 @@
-import { TOKENS, USDC_DENOM, VYNTREX_MARKET_URLS } from '../../utils/constants';
+import { TOKENS } from '../../utils/constants';
 import { getAddressScannerUrl } from '../../utils/format';
 
 export function Footer() {
@@ -32,13 +32,13 @@ export function Footer() {
             CL8Y token
           </a>
           <a
-            href={VYNTREX_MARKET_URLS.usdc}
+            href={getAddressScannerUrl(TOKENS.usdt.address)}
             target="_blank"
             rel="noopener noreferrer"
             className="text-amber-400/80 hover:text-amber-300"
-            title={USDC_DENOM}
+            title={TOKENS.usdt.address}
           >
-            Noble USDC (IBC)
+            CL8Y USDT (CW20)
           </a>
         </div>
       </div>

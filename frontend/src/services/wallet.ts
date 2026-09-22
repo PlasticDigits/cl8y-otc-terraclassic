@@ -20,7 +20,7 @@ import type { UnsignedTx } from '@goblinhunt/cosmes/wallet';
 import { NETWORKS, DEFAULT_NETWORK } from '../utils/constants';
 
 const GAS_PRICE_ULUNA = '28.325';
-const SWAP_GAS_LIMIT = 500000;
+const SWAP_GAS_LIMIT = 800000;
 
 const networkConfig = NETWORKS[DEFAULT_NETWORK];
 const TERRA_CLASSIC_CHAIN_ID = networkConfig.chainId;
