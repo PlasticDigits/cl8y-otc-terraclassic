@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useWalletStore, checkWalletAvailability, WalletName, WalletType } from '../stores/wallet';
 import { contractService } from '../services/contract';
-import { TOKENS, USDC_DENOM } from '../utils/constants';
+import { TOKENS } from '../utils/constants';
 
 export { WalletName, WalletType };
 
@@ -19,11 +19,11 @@ export function useWallet() {
   const refreshBalances = useCallback(async () => {
     if (!store.address) return;
     try {
-      const [usdc, cl8y] = await Promise.all([
-        contractService.getNativeBalance(store.address, USDC_DENOM),
+      const [usdt, cl8y] = await Promise.all([
+        contractService.getCw20Balance(TOKENS.usdt.address, store.address),
         contractService.getCw20Balance(TOKENS.cl8y.address, store.address),
       ]);
-      store.setBalances({ usdc, cl8y });
+      store.setBalances({ usdt, cl8y });
     } catch (error) {
       console.error('Failed to refresh balances:', error);
     }

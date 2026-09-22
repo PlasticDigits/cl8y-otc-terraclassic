@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useWallet } from '../hooks/useWallet';
 import { useOtcConfig, useUpdateRate, useUpdateDestination } from '../hooks/useContract';
-import { isOwnerWallet, priceToUsdcDisplay } from '../utils/swap';
+import { isOwnerWallet, priceToUsdtDisplay } from '../utils/swap';
 import { parseAmount } from '../utils/format';
 import { CONTRACTS, DEFAULT_NETWORK, TOKENS } from '../utils/constants';
 import { Card, CardContent, Button, CopyableAddress } from '../components/common';
@@ -46,7 +46,7 @@ export function AdminPage() {
 
   const handleUpdateRate = async () => {
     setMessage(null);
-    const micro = parseAmount(priceInput, TOKENS.usdc.decimals);
+    const micro = parseAmount(priceInput, TOKENS.usdt.decimals);
     try {
       const res = await updateRate.mutateAsync(micro);
       setMessage(`Rate updated: ${res.txHash}`);
@@ -90,11 +90,11 @@ export function AdminPage() {
           <div>
             <p className="text-sm text-gray-400">Current CL8Y price</p>
             <p className="text-xl font-mono-numbers text-amber-400">
-              {config ? `${priceToUsdcDisplay(config.price)} USDC per CL8Y` : '—'}
+              {config ? `${priceToUsdtDisplay(config.price)} USDT per CL8Y` : '—'}
             </p>
           </div>
           <div>
-            <label className="text-sm text-gray-400 block mb-1">New price (USDC per CL8Y)</label>
+            <label className="text-sm text-gray-400 block mb-1">New price (USDT per CL8Y)</label>
             <input
               type="number"
               step="any"
@@ -119,7 +119,7 @@ export function AdminPage() {
       <Card>
         <CardContent className="space-y-4">
           <div>
-            <p className="text-sm text-gray-400">USDC destination</p>
+            <p className="text-sm text-gray-400">USDT destination</p>
             <p className="text-sm font-mono text-white break-all">{config?.destination}</p>
           </div>
           <div>

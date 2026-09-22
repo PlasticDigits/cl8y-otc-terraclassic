@@ -9,11 +9,26 @@ pub enum ContractError {
     #[error("Unauthorized")]
     Unauthorized {},
 
-    #[error("No funds sent")]
+    #[error("USDT amount must be greater than zero")]
     NoFunds {},
 
-    #[error("Invalid funds: expected exactly one coin of {expected}")]
-    InvalidFunds { expected: String },
+    #[error("Native funds are not accepted")]
+    UnexpectedFunds {},
+
+    #[error("Invalid CW20 hook message")]
+    InvalidHook {},
+
+    #[error("USDT and CL8Y must be different tokens")]
+    InvalidTokenConfig {},
+
+    #[error("Contract is already migrated to USDT")]
+    AlreadyMigrated {},
+
+    #[error("Unsupported migration from version {version}")]
+    UnsupportedVersion { version: String },
+
+    #[error("Legacy payment denom is not Noble USDC")]
+    UnexpectedLegacyDenom {},
 
     #[error("Insufficient CL8Y in contract")]
     InsufficientCl8y {},

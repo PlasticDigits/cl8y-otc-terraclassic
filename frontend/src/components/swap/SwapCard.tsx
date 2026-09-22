@@ -3,30 +3,30 @@ import { Card, CardContent, Button } from '../common';
 import { useWallet } from '../../hooks/useWallet';
 import { useOtcCl8yBalance, useOtcConfig, useSwap } from '../../hooks/useContract';
 import { formatAmount, parseAmount } from '../../utils/format';
-import { computeCl8yOut, priceToUsdcDisplay, cl8yPerUsdc } from '../../utils/swap';
-import { TOKENS } from '../../utils/constants';
+import { computeCl8yOut, priceToUsdtDisplay, cl8yPerUsdt } from '../../utils/swap';
+import { DEFAULT_PRICE, TOKENS } from '../../utils/constants';
 import { useBuyHistoryStore } from '../../stores/buyHistory';
 import { SwapSuccessPopover } from './SwapSuccessPopover';
 
 export function SwapCard() {
-  const { connected, address, usdcBalance, refreshBalances } = useWallet();
+  const { connected, address, usdtBalance, refreshBalances } = useWallet();
   const { data: config } = useOtcConfig();
   const { data: otcCl8yBalance } = useOtcCl8yBalance();
   const swap = useSwap();
   const addBuy = useBuyHistoryStore((s) => s.addBuy);
 
-  const [usdcInput, setUsdcInput] = useState('');
+  const [usdtInput, setUsdtInput] = useState('');
   const [successCl8yAmount, setSuccessCl8yAmount] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const price = config?.price || '700000';
-  const usdcMicro = useMemo(() => parseAmount(usdcInput, TOKENS.usdc.decimals), [usdcInput]);
-  const cl8yOut = useMemo(() => computeCl8yOut(usdcMicro, price).toString(), [usdcMicro, price]);
+  const price = config?.price || DEFAULT_PRICE;
+  const usdtBase = useMemo(() => parseAmount(usdtInput, TOKENS.usdt.decimals), [usdtInput]);
+  const cl8yOut = useMemo(() => computeCl8yOut(usdtBase, price).toString(), [usdtBase, price]);
 
   const canSwap =
     connected &&
-    BigInt(usdcMicro || '0') > 0n &&
-    BigInt(usdcMicro || '0') <= BigInt(usdcBalance || '0') &&
+    BigInt(usdtBase || '0') > 0n &&
+    BigInt(usdtBase || '0') <= BigInt(usdtBalance || '0') &&
     !swap.isPending;
 
   const handleSwap = async () => {
@@ -34,12 +34,12 @@ export function SwapCard() {
     setSuccessCl8yAmount(null);
     const boughtCl8y = formatAmount(cl8yOut, TOKENS.cl8y.decimals, 2);
     try {
-      const result = await swap.mutateAsync(usdcMicro);
+      const result = await swap.mutateAsync(usdtBase);
       setSuccessCl8yAmount(boughtCl8y);
       if (address) {
         addBuy({ txHash: result.txHash, cl8yAmount: boughtCl8y, walletAddress: address });
       }
-      setUsdcInput('');
+      setUsdtInput('');
       await refreshBalances();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Swap failed');
@@ -59,9 +59,9 @@ export function SwapCard() {
         <div className="text-center space-y-1">
           <p className="text-sm text-gray-400">Rate</p>
           <p className="text-xl font-mono-numbers text-amber-400">
-            1 CL8Y = {priceToUsdcDisplay(price)} USDC
+            1 CL8Y = {priceToUsdtDisplay(price)} USDT
           </p>
-          <p className="text-xs text-gray-500">1 USDC ≈ {cl8yPerUsdc(price)} CL8Y</p>
+          <p className="text-xs text-gray-500">1 USDT ≈ {cl8yPerUsdt(price)} CL8Y</p>
         </div>
 
         <div className="space-y-3">
@@ -73,15 +73,15 @@ export function SwapCard() {
                 min="0"
                 step="any"
                 placeholder="0.00"
-                value={usdcInput}
-                onChange={(e) => setUsdcInput(e.target.value)}
+                value={usdtInput}
+                onChange={(e) => setUsdtInput(e.target.value)}
                 className="bg-transparent text-2xl font-mono-numbers text-white w-full outline-none"
               />
-              <span className="text-amber-400 font-semibold ml-2">USDC</span>
+              <span className="text-amber-400 font-semibold ml-2">USDT</span>
             </div>
             {connected && (
               <p className="text-xs text-gray-500 mt-1">
-                Balance: {formatAmount(usdcBalance, 6)} USDC
+                Balance: {formatAmount(usdtBalance, TOKENS.usdt.decimals)} USDT
               </p>
             )}
           </label>
@@ -96,7 +96,7 @@ export function SwapCard() {
             <span className="text-sm text-gray-400 mb-1 block">You receive</span>
             <div className="glass border border-white/10 rounded-xl p-4 flex items-center justify-between">
               <span className="text-2xl font-mono-numbers text-white">
-                {usdcInput ? formatAmount(cl8yOut, 18, 6) : '0.00'}
+                {usdtInput ? formatAmount(cl8yOut, 18, 6) : '0.00'}
               </span>
               <span className="text-amber-400 font-semibold ml-2">CL8Y</span>
             </div>
