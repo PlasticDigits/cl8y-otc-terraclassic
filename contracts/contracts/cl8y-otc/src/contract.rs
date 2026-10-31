@@ -11,12 +11,13 @@ use cw20::{Cw20ExecuteMsg, Cw20QueryMsg, Cw20ReceiveMsg};
 
 use crate::error::ContractError;
 use crate::msg::{
-    ConfigResponse, Cw20HookMsg, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg,
-    SimulateSwapResponse,
+    ConfigResponse, Cw20HookMsg, ExecuteMsg, InstantiateMsg, LegacyMigrateMsg, MigrateMsg,
+    PauseStatusResponse, PauseUpgradeMsg, QueryMsg, SimulateSwapResponse,
 };
 use crate::state::{
-    Config, CL8Y_UNIT, CONFIG, CONTRACT_NAME, CONTRACT_VERSION, DEFAULT_PRICE, LEGACY_CONFIG,
-    LEGACY_PRICE_SCALE, NOBLE_USDC_DENOM, TOTAL_USDC_SPENT, TOTAL_USDT_SPENT,
+    Config, PauseState, CL8Y_UNIT, CONFIG, CONTRACT_NAME, CONTRACT_VERSION, DEFAULT_PRICE,
+    LEGACY_CONFIG, LEGACY_PRICE_SCALE, NOBLE_USDC_DENOM, PAUSE_STATE, TOTAL_USDC_SPENT,
+    TOTAL_USDT_SPENT,
 };
 
 // ============ INSTANTIATE ============
@@ -51,6 +52,7 @@ pub fn instantiate(
 
     CONFIG.save(deps.storage, &config)?;
     TOTAL_USDT_SPENT.save(deps.storage, &Uint128::zero())?;
+    PAUSE_STATE.save(deps.storage, &PauseState::default())?;
 
     Ok(Response::new()
         .add_attribute("action", "instantiate")
@@ -76,6 +78,11 @@ pub fn execute(
         }
         ExecuteMsg::WithdrawCl8y { amount } => execute_withdraw_cl8y(deps, info, amount),
         ExecuteMsg::WithdrawUsdt { amount } => execute_withdraw_usdt(deps, info, amount),
+        ExecuteMsg::Pause {} => execute_pause(deps, info, true),
+        ExecuteMsg::Unpause {} => execute_pause(deps, info, false),
+        ExecuteMsg::SetPauseGuardian { guardian } => {
+            execute_set_pause_guardian(deps, env, info, guardian)
+        }
     }
 }
 
@@ -92,6 +99,7 @@ fn execute_receive(
     if !info.funds.is_empty() {
         return Err(ContractError::UnexpectedFunds {});
     }
+    assert_not_paused(deps.as_ref())?;
 
     let hook: Cw20HookMsg = from_json(&msg.msg).map_err(|_| ContractError::InvalidHook {})?;
     match hook {
@@ -108,6 +116,8 @@ fn execute_swap(
     payer: cosmwasm_std::Addr,
     usdt_in: Uint128,
 ) -> Result<Response, ContractError> {
+    // Defense in depth for future intake paths: no swap executor can bypass it.
+    assert_not_paused(deps.as_ref())?;
     if usdt_in.is_zero() {
         return Err(ContractError::NoFunds {});
     }
@@ -154,6 +164,69 @@ fn execute_swap(
         .add_attribute("sender", payer)
         .add_attribute("usdt_in", usdt_in)
         .add_attribute("cl8y_out", cl8y_out))
+}
+
+fn assert_not_paused(deps: Deps) -> Result<(), ContractError> {
+    if PAUSE_STATE
+        .may_load(deps.storage)?
+        .unwrap_or_default()
+        .paused
+    {
+        return Err(ContractError::Paused {});
+    }
+    Ok(())
+}
+
+fn execute_pause(
+    deps: DepsMut,
+    info: MessageInfo,
+    paused: bool,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    let mut state = PAUSE_STATE.may_load(deps.storage)?.unwrap_or_default();
+    if info.sender != config.owner && (!paused || state.guardian.as_ref() != Some(&info.sender)) {
+        return Err(ContractError::Unauthorized {});
+    }
+    if !info.funds.is_empty() {
+        return Err(ContractError::UnexpectedFunds {});
+    }
+    state.paused = paused;
+    PAUSE_STATE.save(deps.storage, &state)?;
+    Ok(Response::new()
+        .add_attribute("action", if paused { "pause" } else { "unpause" })
+        .add_attribute("sender", info.sender))
+}
+
+fn execute_set_pause_guardian(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    guardian: Option<String>,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    assert_owner(&info, &config.owner)?;
+    if !info.funds.is_empty() {
+        return Err(ContractError::UnexpectedFunds {});
+    }
+    let guardian = guardian
+        .map(|address| deps.api.addr_validate(&address))
+        .transpose()?;
+    if matches!(guardian.as_ref(), Some(address) if address == &config.owner || address == &env.contract.address)
+    {
+        return Err(ContractError::InvalidPauseGuardian {});
+    }
+    let mut state = PAUSE_STATE.may_load(deps.storage)?.unwrap_or_default();
+    state.guardian = guardian;
+    PAUSE_STATE.save(deps.storage, &state)?;
+    Ok(Response::new()
+        .add_attribute("action", "set_pause_guardian")
+        .add_attribute(
+            "guardian",
+            state
+                .guardian
+                .map(|address| address.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+        ))
 }
 
 fn execute_update_rate(
@@ -243,6 +316,13 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::Config {} => to_json_binary(&query_config(deps)?),
         QueryMsg::TotalUsdtSpent {} => to_json_binary(&TOTAL_USDT_SPENT.load(deps.storage)?),
         QueryMsg::SimulateSwap { usdt_in } => to_json_binary(&query_simulate_swap(deps, usdt_in)?),
+        QueryMsg::PauseStatus {} => {
+            let state = PAUSE_STATE.may_load(deps.storage)?.unwrap_or_default();
+            to_json_binary(&PauseStatusResponse {
+                paused: state.paused,
+                guardian: state.guardian,
+            })
+        }
     }
 }
 
@@ -261,16 +341,42 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
-    let from_version =
-        cw2::ensure_from_older_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
-    let from_version = from_version.to_string();
+    let identity = cw2::get_contract_version(deps.storage)?;
+    if identity.contract != CONTRACT_NAME {
+        return Err(StdError::generic_err("Migration contract name mismatch").into());
+    }
+    let from_version = identity.version;
     if from_version == CONTRACT_VERSION {
         return Err(ContractError::AlreadyMigrated {});
     }
-    if from_version != "0.1.0" {
-        return Err(ContractError::UnsupportedVersion {
+    match msg {
+        MigrateMsg::LegacyUsdcToUsdt(msg) if from_version == "0.1.0" => {
+            migrate_legacy_usdc(deps, msg)
+        }
+        MigrateMsg::PauseUpgrade(PauseUpgradeMsg::PauseUpgrade {}) if from_version == "0.2.0" => {
+            // Read the existing shape/accounting before adding the new key.
+            // Do not rewrite config, balances, prices, destination or totals.
+            CONFIG.load(deps.storage)?;
+            TOTAL_USDT_SPENT.load(deps.storage)?;
+            if PAUSE_STATE.may_load(deps.storage)?.is_some() {
+                return Err(ContractError::PauseStateExists {});
+            }
+            PAUSE_STATE.save(deps.storage, &PauseState::default())?;
+            set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+            Ok(Response::new()
+                .add_attribute("action", "migrate_pause_upgrade")
+                .add_attribute("from_version", from_version)
+                .add_attribute("to_version", CONTRACT_VERSION))
+        }
+        _ => Err(ContractError::UnsupportedVersion {
             version: from_version,
-        });
+        }),
+    }
+}
+
+fn migrate_legacy_usdc(deps: DepsMut, msg: LegacyMigrateMsg) -> Result<Response, ContractError> {
+    if PAUSE_STATE.may_load(deps.storage)?.is_some() {
+        return Err(ContractError::PauseStateExists {});
     }
 
     let legacy = LEGACY_CONFIG.load(deps.storage)?;
@@ -311,10 +417,12 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
     };
     CONFIG.save(deps.storage, &config)?;
     TOTAL_USDT_SPENT.save(deps.storage, &Uint128::zero())?;
+    PAUSE_STATE.save(deps.storage, &PauseState::default())?;
+    set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
     Ok(Response::new()
         .add_attribute("action", "migrate")
-        .add_attribute("from_version", from_version)
+        .add_attribute("from_version", "0.1.0")
         .add_attribute("to_version", CONTRACT_VERSION)
         .add_attribute("usdt_token", config.usdt_token)
         .add_attribute("price", price)
@@ -348,6 +456,10 @@ pub fn compute_cl8y_out(usdt_in: Uint128, price: Uint128) -> Result<Uint128, Con
     let out = numerator / Uint256::from(price);
     out.try_into().map_err(|_| ContractError::Overflow {})
 }
+
+#[cfg(test)]
+#[path = "pause_tests.rs"]
+mod pause_tests;
 
 // ============ TESTS ============
 
@@ -788,10 +900,10 @@ mod tests {
     }
 
     fn migrate_msg() -> MigrateMsg {
-        MigrateMsg {
+        MigrateMsg::LegacyUsdcToUsdt(LegacyMigrateMsg {
             usdt_token: USDT.to_string(),
             price: None,
-        }
+        })
     }
 
     #[test]
@@ -822,7 +934,7 @@ mod tests {
 
         let version = cw2::get_contract_version(&deps.storage).unwrap();
         assert_eq!(version.contract, CONTRACT_NAME);
-        assert_eq!(version.version, "0.2.0");
+        assert_eq!(version.version, CONTRACT_VERSION);
     }
 
     #[test]
@@ -867,10 +979,10 @@ mod tests {
         migrate(
             deps.as_mut(),
             mock_env(),
-            MigrateMsg {
+            MigrateMsg::LegacyUsdcToUsdt(LegacyMigrateMsg {
                 usdt_token: USDT.to_string(),
                 price: Some(Uint128::new(DEFAULT_PRICE)),
-            },
+            }),
         )
         .unwrap();
         assert_eq!(
@@ -1134,5 +1246,145 @@ mod integration_tests {
 
         let err = send_usdt(&mut env, DEFAULT_PRICE).unwrap_err();
         assert!(err.root_cause().to_string().contains("Insufficient CL8Y"));
+    }
+
+    #[test]
+    fn pause17_cw20_send_is_atomic_and_owner_recovery_still_works() {
+        let mut env = setup_integration();
+        let guardian = Addr::unchecked("pause-guardian");
+        env.app
+            .execute_contract(
+                Addr::unchecked(OWNER),
+                env.otc.clone(),
+                &ExecuteMsg::SetPauseGuardian {
+                    guardian: Some(guardian.to_string()),
+                },
+                &[],
+            )
+            .unwrap();
+        env.app
+            .execute_contract(
+                guardian.clone(),
+                env.otc.clone(),
+                &ExecuteMsg::Pause {},
+                &[],
+            )
+            .unwrap();
+        let balances = |test: &TestEnv| {
+            [
+                (test.usdt.clone(), USER),
+                (test.usdt.clone(), DEST),
+                (test.cl8y.clone(), USER),
+                (test.cl8y.clone(), OWNER),
+            ]
+            .into_iter()
+            .map(|(token, address)| {
+                test.app
+                    .wrap()
+                    .query_wasm_smart::<cw20::BalanceResponse>(
+                        token,
+                        &Cw20QueryMsg::Balance {
+                            address: address.to_string(),
+                        },
+                    )
+                    .unwrap()
+                    .balance
+            })
+            .collect::<Vec<_>>()
+        };
+        let before = balances(&env);
+        let error = send_usdt(&mut env, DEFAULT_PRICE).unwrap_err();
+        assert!(error
+            .root_cause()
+            .to_string()
+            .contains("New swaps are paused"));
+        assert_eq!(before, balances(&env));
+        let total: Uint128 = env
+            .app
+            .wrap()
+            .query_wasm_smart(env.otc.clone(), &QueryMsg::TotalUsdtSpent {})
+            .unwrap();
+        assert!(total.is_zero());
+        let held_usdt: cw20::BalanceResponse = env
+            .app
+            .wrap()
+            .query_wasm_smart(
+                env.usdt.clone(),
+                &Cw20QueryMsg::Balance {
+                    address: env.otc.to_string(),
+                },
+            )
+            .unwrap();
+        assert!(held_usdt.balance.is_zero());
+        // A blind CW20 Transfer has no receiver hook and cannot be intercepted
+        // by the OTC contract. Its existing owner recovery remains usable.
+        env.app
+            .execute_contract(
+                Addr::unchecked(USER),
+                env.usdt.clone(),
+                &Cw20ExecuteMsgBase::Transfer {
+                    recipient: env.otc.to_string(),
+                    amount: Uint128::new(17),
+                },
+                &[],
+            )
+            .unwrap();
+        assert!(env
+            .app
+            .execute_contract(
+                guardian,
+                env.otc.clone(),
+                &ExecuteMsg::WithdrawUsdt {
+                    amount: Uint128::new(17)
+                },
+                &[]
+            )
+            .is_err());
+        env.app
+            .execute_contract(
+                Addr::unchecked(OWNER),
+                env.otc.clone(),
+                &ExecuteMsg::WithdrawUsdt {
+                    amount: Uint128::new(17),
+                },
+                &[],
+            )
+            .unwrap();
+        env.app
+            .execute_contract(
+                Addr::unchecked(OWNER),
+                env.otc.clone(),
+                &ExecuteMsg::WithdrawCl8y {
+                    amount: Uint128::one(),
+                },
+                &[],
+            )
+            .unwrap();
+        let owner_usdt: cw20::BalanceResponse = env
+            .app
+            .wrap()
+            .query_wasm_smart(
+                env.usdt.clone(),
+                &Cw20QueryMsg::Balance {
+                    address: OWNER.to_string(),
+                },
+            )
+            .unwrap();
+        assert_eq!(owner_usdt.balance, Uint128::new(17));
+        env.app
+            .execute_contract(
+                Addr::unchecked(OWNER),
+                env.otc.clone(),
+                &ExecuteMsg::Unpause {},
+                &[],
+            )
+            .unwrap();
+        send_usdt(&mut env, DEFAULT_PRICE).unwrap();
+        let total: Uint128 = env
+            .app
+            .wrap()
+            .query_wasm_smart(env.otc.clone(), &QueryMsg::TotalUsdtSpent {})
+            .unwrap();
+        assert_eq!(total, Uint128::new(DEFAULT_PRICE));
     }
 }

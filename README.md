@@ -1,5 +1,9 @@
 # CL8Y OTC Swap (Terra Classic)
 
+Pause-only guardian source for v0.3.0 and its narrow migration paths are in
+[docs/PAUSE.md](docs/PAUSE.md). Deployment and admin verification are separate;
+this source change is not live pause enrollment.
+
 Trusted-owner OTC swap on Terra Classic: users pay CL8Y bridged USDT (CW20, 18 decimals) and receive CL8Y CW20 at an owner-set price.
 
 ## Structure

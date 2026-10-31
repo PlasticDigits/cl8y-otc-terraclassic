@@ -41,3 +41,14 @@ pub const CONFIG: Item<Config> = Item::new("config");
 pub const LEGACY_CONFIG: Item<LegacyConfig> = Item::new("config");
 pub const TOTAL_USDT_SPENT: Item<Uint128> = Item::new("total_usdt_spent");
 pub const TOTAL_USDC_SPENT: Item<Uint128> = Item::new("total_usdc_spent");
+
+/// Separate from the historical config/accounting layout. Missing old storage
+/// means unpaused with no delegated guardian; query helpers never mutate it.
+#[cw_serde]
+#[derive(Default)]
+pub struct PauseState {
+    pub paused: bool,
+    pub guardian: Option<Addr>,
+}
+
+pub const PAUSE_STATE: Item<PauseState> = Item::new("cl8y_otc_pause_v1");

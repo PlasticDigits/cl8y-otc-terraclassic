@@ -9,6 +9,15 @@ pub enum ContractError {
     #[error("Unauthorized")]
     Unauthorized {},
 
+    #[error("New swaps are paused")]
+    Paused {},
+
+    #[error("Guardian must be separate from the owner and this contract")]
+    InvalidPauseGuardian {},
+
+    #[error("Pause state already exists; no implicit overwrite during migration")]
+    PauseStateExists {},
+
     #[error("USDT amount must be greater than zero")]
     NoFunds {},
 

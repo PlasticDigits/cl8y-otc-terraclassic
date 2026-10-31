@@ -25,6 +25,12 @@ pub enum ExecuteMsg {
     WithdrawCl8y { amount: Uint128 },
     /// Owner: withdraw USDT that was transferred in without a swap hook.
     WithdrawUsdt { amount: Uint128 },
+    /// Owner or the current pause-only guardian: stop new swaps.
+    Pause {},
+    /// Owner only: resume swaps after independent recovery review.
+    Unpause {},
+    /// Owner only. None revokes; cannot name the owner or this contract.
+    SetPauseGuardian { guardian: Option<String> },
 }
 
 /// Payload wrapped in the USDT CW20 `Send` message.
@@ -42,6 +48,8 @@ pub enum QueryMsg {
     TotalUsdtSpent {},
     #[returns(SimulateSwapResponse)]
     SimulateSwap { usdt_in: Uint128 },
+    #[returns(PauseStatusResponse)]
+    PauseStatus {},
 }
 
 #[cw_serde]
@@ -59,7 +67,27 @@ pub struct SimulateSwapResponse {
 }
 
 #[cw_serde]
-pub struct MigrateMsg {
+pub struct PauseStatusResponse {
+    pub paused: bool,
+    pub guardian: Option<Addr>,
+}
+
+#[cw_serde]
+#[serde(untagged)]
+pub enum MigrateMsg {
+    /// Preserve the exact old {usdt_token, price} wire shape for v0.1.0 only.
+    LegacyUsdcToUsdt(LegacyMigrateMsg),
+    /// A distinct wire message; permitted only from the exact v0.2.0 state.
+    PauseUpgrade(PauseUpgradeMsg),
+}
+
+#[cw_serde]
+pub enum PauseUpgradeMsg {
+    PauseUpgrade {},
+}
+
+#[cw_serde]
+pub struct LegacyMigrateMsg {
     /// CL8Y bridged USDT CW20 (18 decimals).
     pub usdt_token: String,
     /// USDT base units per whole CL8Y. When omitted, the stored 6-decimal
