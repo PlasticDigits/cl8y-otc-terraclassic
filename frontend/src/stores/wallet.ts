@@ -22,13 +22,13 @@ export interface WalletState {
   walletType: TerraWalletType | null;
   connectionType: WalletType | null;
   chainId: string | null;
-  usdcBalance: string;
+  usdtBalance: string;
   cl8yBalance: string;
   connectingWallet: WalletName | null;
   showWalletModal: boolean;
   connect: (walletName: WalletName, walletType?: WalletType) => Promise<void>;
   disconnect: () => Promise<void>;
-  setBalances: (balances: { usdc?: string; cl8y?: string }) => void;
+  setBalances: (balances: { usdt?: string; cl8y?: string }) => void;
   cancelConnection: () => void;
   setShowWalletModal: (show: boolean) => void;
 }
@@ -53,7 +53,7 @@ export const useWalletStore = create<WalletState>()(
       walletType: null,
       connectionType: null,
       chainId: null,
-      usdcBalance: '0',
+      usdtBalance: '0',
       cl8yBalance: '0',
       connectingWallet: null,
       showWalletModal: false,
@@ -95,14 +95,14 @@ export const useWalletStore = create<WalletState>()(
           walletType: null,
           connectionType: null,
           chainId: null,
-          usdcBalance: '0',
+          usdtBalance: '0',
           cl8yBalance: '0',
         });
       },
 
       setBalances: (balances) => {
         set((state) => ({
-          usdcBalance: balances.usdc ?? state.usdcBalance,
+          usdtBalance: balances.usdt ?? state.usdtBalance,
           cl8yBalance: balances.cl8y ?? state.cl8yBalance,
         }));
       },

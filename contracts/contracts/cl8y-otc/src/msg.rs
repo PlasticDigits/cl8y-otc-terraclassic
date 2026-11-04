@@ -1,26 +1,36 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::{Addr, Uint128};
+use cw20::Cw20ReceiveMsg;
 
 #[cw_serde]
 pub struct InstantiateMsg {
     pub owner: String,
     pub cl8y_token: String,
-    pub usdc_denom: String,
+    /// CL8Y bridged USDT CW20 (18 decimals).
+    pub usdt_token: String,
     pub destination: String,
-    /// Micro-USDC per 1 whole CL8Y. Defaults to 700_000 (0.70 USDC).
+    /// USDT base units per 1 whole CL8Y. Defaults to 0.70 USDT (7 × 10^17).
     pub price: Option<Uint128>,
 }
 
 #[cw_serde]
 pub enum ExecuteMsg {
-    /// Swap native USDC for CL8Y at the current rate.
-    Swap {},
-    /// Owner: update CL8Y price in micro-USDC per whole token.
+    /// CW20 receive hook. The USDT token calls this after `Send`.
+    Receive(Cw20ReceiveMsg),
+    /// Owner: update CL8Y price in USDT base units per whole token.
     UpdateRate { price: Uint128 },
-    /// Owner: update USDC destination address.
+    /// Owner: update USDT destination address.
     UpdateDestination { destination: String },
     /// Owner: withdraw CL8Y from contract inventory.
     WithdrawCl8y { amount: Uint128 },
+    /// Owner: withdraw USDT that was transferred in without a swap hook.
+    WithdrawUsdt { amount: Uint128 },
+}
+
+/// Payload wrapped in the USDT CW20 `Send` message.
+#[cw_serde]
+pub enum Cw20HookMsg {
+    Swap {},
 }
 
 #[cw_serde]
@@ -29,16 +39,16 @@ pub enum QueryMsg {
     #[returns(ConfigResponse)]
     Config {},
     #[returns(Uint128)]
-    TotalUsdcSpent {},
+    TotalUsdtSpent {},
     #[returns(SimulateSwapResponse)]
-    SimulateSwap { usdc_in: Uint128 },
+    SimulateSwap { usdt_in: Uint128 },
 }
 
 #[cw_serde]
 pub struct ConfigResponse {
     pub owner: Addr,
     pub cl8y_token: Addr,
-    pub usdc_denom: String,
+    pub usdt_token: Addr,
     pub destination: Addr,
     pub price: Uint128,
 }
@@ -46,4 +56,13 @@ pub struct ConfigResponse {
 #[cw_serde]
 pub struct SimulateSwapResponse {
     pub cl8y_out: Uint128,
+}
+
+#[cw_serde]
+pub struct MigrateMsg {
+    /// CL8Y bridged USDT CW20 (18 decimals).
+    pub usdt_token: String,
+    /// USDT base units per whole CL8Y. When omitted, the stored 6-decimal
+    /// Noble USDC price is multiplied by 10^12.
+    pub price: Option<Uint128>,
 }

@@ -4,13 +4,13 @@
     "rpc": "https://terra-classic-rpc.publicnode.com:443",
     "lcd": "https://terra-classic-lcd.publicnode.com",
     "cl8y_token": "terra16wtml2q66g82fdkx66tap0qjkahqwp4lwq3ngtygacg5q0kzycgqvhpax3",
-    "usdc_denom": "ibc/0BB9D8513E8E8E9AE6A9D211D9136E6DA42288DDE6CFAA453A150A4566054DC5",
+    "usdt_token": "terra1z0xe7t5ymmltg4vju8tghkq0pewy4et548ta23nlu9zxtl950uyqkv8mv4",
     "instantiate": {
       "owner": "terra1xsecn4snv94ezcez0z3vq8an9j4h4kxxcydp8l",
       "cl8y_token": "terra16wtml2q66g82fdkx66tap0qjkahqwp4lwq3ngtygacg5q0kzycgqvhpax3",
-      "usdc_denom": "ibc/0BB9D8513E8E8E9AE6A9D211D9136E6DA42288DDE6CFAA453A150A4566054DC5",
+      "usdt_token": "terra1z0xe7t5ymmltg4vju8tghkq0pewy4et548ta23nlu9zxtl950uyqkv8mv4",
       "destination": "terra13evv7q05sfxtdf0jn7lz032mjyprknrwxrzj36",
-      "price": "700000"
+      "price": "700000000000000000"
     }
   },
   "testnet": {
@@ -18,13 +18,13 @@
     "rpc": "https://terra-classic-testnet-rpc.publicnode.com:443",
     "lcd": "https://lcd.luncblaze.com",
     "cl8y_token": "",
-    "usdc_denom": "ibc/0BB9D8513E8E8E9AE6A9D211D9136E6DA42288DDE6CFAA453A150A4566054DC5",
+    "usdt_token": "",
     "instantiate": {
       "owner": "terra1xsecn4snv94ezcez0z3vq8an9j4h4kxxcydp8l",
       "cl8y_token": "",
-      "usdc_denom": "ibc/0BB9D8513E8E8E9AE6A9D211D9136E6DA42288DDE6CFAA453A150A4566054DC5",
+      "usdt_token": "",
       "destination": "terra13evv7q05sfxtdf0jn7lz032mjyprknrwxrzj36",
-      "price": "700000"
+      "price": "700000000000000000"
     }
   }
 }

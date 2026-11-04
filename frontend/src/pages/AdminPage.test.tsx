@@ -11,12 +11,11 @@ vi.mock('../services/contract', () => ({
       Promise.resolve({
         owner: 'terra1mockowner000000000000000000000000',
         cl8y_token: 'terra1cl8y',
-        usdc_denom: 'ibc/test',
+        usdt_token: 'terra1usdt',
         destination: 'terra1dest',
-        price: '700000',
+        price: '700000000000000000',
       })
     ),
-    getNativeBalance: vi.fn(() => Promise.resolve('0')),
     getCw20Balance: vi.fn(() => Promise.resolve('0')),
     getOtcAddress: () => '',
     updateRate: vi.fn(),
@@ -38,7 +37,7 @@ describe('AdminPage', () => {
     useWalletStore.setState({
       connected: false,
       address: null,
-      usdcBalance: '0',
+      usdtBalance: '0',
       cl8yBalance: '0',
     });
   });

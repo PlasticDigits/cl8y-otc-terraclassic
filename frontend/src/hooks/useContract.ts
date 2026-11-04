@@ -18,18 +18,18 @@ export function useOtcCl8yBalance() {
   });
 }
 
-export function useSimulateSwap(usdcInMicro: string) {
+export function useSimulateSwap(usdtIn: string) {
   return useQuery({
-    queryKey: ['otc', 'simulate', usdcInMicro],
-    queryFn: () => contractService.simulateSwap(usdcInMicro),
-    enabled: BigInt(usdcInMicro || '0') > 0n,
+    queryKey: ['otc', 'simulate', usdtIn],
+    queryFn: () => contractService.simulateSwap(usdtIn),
+    enabled: BigInt(usdtIn || '0') > 0n,
   });
 }
 
 export function useSwap() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (usdcAmountMicro: string) => contractService.executeSwap(usdcAmountMicro),
+    mutationFn: (usdtAmount: string) => contractService.executeSwap(usdtAmount),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['otc'] });
     },

@@ -11,7 +11,7 @@ test.describe('Homepage', () => {
     await expect(page.getByRole('button', { name: 'OTC SWAP' })).toBeVisible();
   });
 
-  test('computes CL8Y output when USDC entered', async ({ page }) => {
+  test('computes CL8Y output when USDT entered', async ({ page }) => {
     await page.goto('/');
     const input = page.getByPlaceholder('0.00');
     await input.fill('0.70');

@@ -16,12 +16,13 @@ npm run dev
 |----------|-------------|
 | `VITE_OTC_CONTRACT` | Deployed OTC contract address (mainnet) |
 | `VITE_CL8Y_TOKEN` | CL8Y CW20 address (default: mainnet CL8Y) |
+| `VITE_USDT_TOKEN` | CL8Y bridged USDT CW20 (default: mainnet USDT, 18 decimals) |
 | `VITE_DEV_MODE` | `true` — mock LCD/wallet for local UX testing |
 | `VITE_MOCK_OWNER` | Owner address for dev admin unlock |
 
 ## Pages
 
-- `/` — Swap UI (connect, balances, rate, USDC → CL8Y)
+- `/` — Swap UI (connect, balances, rate, USDT → CL8Y)
 - `/admin` — Owner-only (not linked); update price & destination
 
 ## Design

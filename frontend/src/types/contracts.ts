@@ -1,7 +1,7 @@
 export interface OtcConfig {
   owner: string;
   cl8y_token: string;
-  usdc_denom: string;
+  usdt_token: string;
   destination: string;
   price: string;
 }

@@ -1,6 +1,6 @@
 # CL8Y OTC Frontend
 
-Static Vite React dApp for USDC → CL8Y OTC swap on Terra Classic.
+Static Vite React dApp for USDT → CL8Y OTC swap on Terra Classic.
 
 ```bash
 npm install

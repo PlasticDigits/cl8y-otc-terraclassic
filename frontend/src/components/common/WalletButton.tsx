@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useWallet, WalletName, WalletType } from '../../hooks/useWallet';
 import { formatAddress, formatAmount } from '../../utils/format';
+import { TOKENS } from '../../utils/constants';
 
 export function WalletButton() {
   const {
@@ -9,7 +10,7 @@ export function WalletButton() {
     connecting,
     connectingWallet,
     address,
-    usdcBalance,
+    usdtBalance,
     cl8yBalance,
     isStationAvailable,
     isKeplrAvailable,
@@ -65,7 +66,7 @@ export function WalletButton() {
             <div className="fixed inset-0 z-40" onClick={() => setShowDropdown(false)} />
             <div className="absolute right-0 mt-2 w-52 glass border border-white/10 rounded-xl shadow-xl z-50 p-2">
               <p className="px-3 py-1 text-xs text-gray-500">{formatAddress(address, 10)}</p>
-              <p className="px-3 py-1 text-sm font-mono-numbers">{formatAmount(usdcBalance, 6)} USDC</p>
+              <p className="px-3 py-1 text-sm font-mono-numbers">{formatAmount(usdtBalance, TOKENS.usdt.decimals)} USDT</p>
               <p className="px-3 py-1 text-sm font-mono-numbers">{formatAmount(cl8yBalance, 18)} CL8Y</p>
               <button
                 onClick={() => { disconnect(); setShowDropdown(false); }}

@@ -1,20 +1,22 @@
-//! CL8Y OTC swap contract — minimal USDC-for-CL8Y at owner-set rate.
+//! CL8Y OTC swap contract — CL8Y bridged USDT (CW20, 18 decimals) for CL8Y.
 
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_json_binary, BankMsg, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response, StdError,
+    from_json, to_json_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError,
     StdResult, Uint128, Uint256, WasmMsg,
 };
 use cw2::set_contract_version;
-use cw20::{Cw20ExecuteMsg, Cw20QueryMsg};
+use cw20::{Cw20ExecuteMsg, Cw20QueryMsg, Cw20ReceiveMsg};
 
 use crate::error::ContractError;
 use crate::msg::{
-    ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg, SimulateSwapResponse,
+    ConfigResponse, Cw20HookMsg, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg,
+    SimulateSwapResponse,
 };
 use crate::state::{
-    Config, CONFIG, CL8Y_UNIT, CONTRACT_NAME, CONTRACT_VERSION, DEFAULT_PRICE, TOTAL_USDC_SPENT,
+    Config, CL8Y_UNIT, CONFIG, CONTRACT_NAME, CONTRACT_VERSION, DEFAULT_PRICE, LEGACY_CONFIG,
+    LEGACY_PRICE_SCALE, NOBLE_USDC_DENOM, TOTAL_USDC_SPENT, TOTAL_USDT_SPENT,
 };
 
 // ============ INSTANTIATE ============
@@ -33,20 +35,27 @@ pub fn instantiate(
         return Err(ContractError::InvalidPrice {});
     }
 
+    let cl8y_token = deps.api.addr_validate(&msg.cl8y_token)?;
+    let usdt_token = deps.api.addr_validate(&msg.usdt_token)?;
+    if cl8y_token == usdt_token {
+        return Err(ContractError::InvalidTokenConfig {});
+    }
+
     let config = Config {
         owner: deps.api.addr_validate(&msg.owner)?,
-        cl8y_token: deps.api.addr_validate(&msg.cl8y_token)?,
-        usdc_denom: msg.usdc_denom,
+        cl8y_token,
+        usdt_token,
         destination: deps.api.addr_validate(&msg.destination)?,
         price,
     };
 
     CONFIG.save(deps.storage, &config)?;
-    TOTAL_USDC_SPENT.save(deps.storage, &Uint128::zero())?;
+    TOTAL_USDT_SPENT.save(deps.storage, &Uint128::zero())?;
 
     Ok(Response::new()
         .add_attribute("action", "instantiate")
         .add_attribute("owner", config.owner)
+        .add_attribute("usdt_token", config.usdt_token)
         .add_attribute("price", price))
 }
 
@@ -60,19 +69,51 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Swap {} => execute_swap(deps, env, info),
+        ExecuteMsg::Receive(msg) => execute_receive(deps, env, info, msg),
         ExecuteMsg::UpdateRate { price } => execute_update_rate(deps, info, price),
         ExecuteMsg::UpdateDestination { destination } => {
             execute_update_destination(deps, info, destination)
         }
         ExecuteMsg::WithdrawCl8y { amount } => execute_withdraw_cl8y(deps, info, amount),
+        ExecuteMsg::WithdrawUsdt { amount } => execute_withdraw_usdt(deps, info, amount),
     }
 }
 
-fn execute_swap(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
+fn execute_receive(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    msg: Cw20ReceiveMsg,
+) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
-    let usdc_in = parse_usdc_funds(&info.funds, &config.usdc_denom)?;
-    let cl8y_out = compute_cl8y_out(usdc_in, config.price)?;
+    if info.sender != config.usdt_token {
+        return Err(ContractError::Unauthorized {});
+    }
+    if !info.funds.is_empty() {
+        return Err(ContractError::UnexpectedFunds {});
+    }
+
+    let hook: Cw20HookMsg = from_json(&msg.msg).map_err(|_| ContractError::InvalidHook {})?;
+    match hook {
+        Cw20HookMsg::Swap {} => {
+            let payer = deps.api.addr_validate(&msg.sender)?;
+            execute_swap(deps, env, payer, msg.amount)
+        }
+    }
+}
+
+fn execute_swap(
+    deps: DepsMut,
+    env: Env,
+    payer: cosmwasm_std::Addr,
+    usdt_in: Uint128,
+) -> Result<Response, ContractError> {
+    if usdt_in.is_zero() {
+        return Err(ContractError::NoFunds {});
+    }
+
+    let config = CONFIG.load(deps.storage)?;
+    let cl8y_out = compute_cl8y_out(usdt_in, config.price)?;
 
     let balance: cw20::BalanceResponse = deps.querier.query_wasm_smart(
         config.cl8y_token.clone(),
@@ -88,29 +129,30 @@ fn execute_swap(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, 
     let transfer_cl8y = WasmMsg::Execute {
         contract_addr: config.cl8y_token.to_string(),
         msg: to_json_binary(&Cw20ExecuteMsg::Transfer {
-            recipient: info.sender.to_string(),
+            recipient: payer.to_string(),
             amount: cl8y_out,
         })?,
         funds: vec![],
     };
 
-    let forward_usdc = BankMsg::Send {
-        to_address: config.destination.to_string(),
-        amount: vec![Coin {
-            denom: config.usdc_denom.clone(),
-            amount: usdc_in,
-        }],
+    let forward_usdt = WasmMsg::Execute {
+        contract_addr: config.usdt_token.to_string(),
+        msg: to_json_binary(&Cw20ExecuteMsg::Transfer {
+            recipient: config.destination.to_string(),
+            amount: usdt_in,
+        })?,
+        funds: vec![],
     };
 
-    let total = TOTAL_USDC_SPENT.load(deps.storage)?;
-    TOTAL_USDC_SPENT.save(deps.storage, &(total + usdc_in))?;
+    let total = TOTAL_USDT_SPENT.load(deps.storage)?;
+    TOTAL_USDT_SPENT.save(deps.storage, &(total + usdt_in))?;
 
     Ok(Response::new()
         .add_message(transfer_cl8y)
-        .add_message(forward_usdc)
+        .add_message(forward_usdt)
         .add_attribute("action", "swap")
-        .add_attribute("sender", info.sender)
-        .add_attribute("usdc_in", usdc_in)
+        .add_attribute("sender", payer)
+        .add_attribute("usdt_in", usdt_in)
         .add_attribute("cl8y_out", cl8y_out))
 }
 
@@ -170,16 +212,37 @@ fn execute_withdraw_cl8y(
         .add_attribute("amount", amount))
 }
 
+fn execute_withdraw_usdt(
+    deps: DepsMut,
+    info: MessageInfo,
+    amount: Uint128,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    assert_owner(&info, &config.owner)?;
+
+    let transfer = WasmMsg::Execute {
+        contract_addr: config.usdt_token.to_string(),
+        msg: to_json_binary(&Cw20ExecuteMsg::Transfer {
+            recipient: config.owner.to_string(),
+            amount,
+        })?,
+        funds: vec![],
+    };
+
+    Ok(Response::new()
+        .add_message(transfer)
+        .add_attribute("action", "withdraw_usdt")
+        .add_attribute("amount", amount))
+}
+
 // ============ QUERY ============
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_json_binary(&query_config(deps)?),
-        QueryMsg::TotalUsdcSpent {} => to_json_binary(&TOTAL_USDC_SPENT.load(deps.storage)?),
-        QueryMsg::SimulateSwap { usdc_in } => {
-            to_json_binary(&query_simulate_swap(deps, usdc_in)?)
-        }
+        QueryMsg::TotalUsdtSpent {} => to_json_binary(&TOTAL_USDT_SPENT.load(deps.storage)?),
+        QueryMsg::SimulateSwap { usdt_in } => to_json_binary(&query_simulate_swap(deps, usdt_in)?),
     }
 }
 
@@ -188,15 +251,79 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     Ok(ConfigResponse {
         owner: c.owner,
         cl8y_token: c.cl8y_token,
-        usdc_denom: c.usdc_denom,
+        usdt_token: c.usdt_token,
         destination: c.destination,
         price: c.price,
     })
 }
 
-fn query_simulate_swap(deps: Deps, usdc_in: Uint128) -> StdResult<SimulateSwapResponse> {
+// ============ MIGRATE ============
+
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, ContractError> {
+    let from_version =
+        cw2::ensure_from_older_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+    let from_version = from_version.to_string();
+    if from_version == CONTRACT_VERSION {
+        return Err(ContractError::AlreadyMigrated {});
+    }
+    if from_version != "0.1.0" {
+        return Err(ContractError::UnsupportedVersion {
+            version: from_version,
+        });
+    }
+
+    let legacy = LEGACY_CONFIG.load(deps.storage)?;
+    if legacy.usdc_denom != NOBLE_USDC_DENOM {
+        return Err(ContractError::UnexpectedLegacyDenom {});
+    }
+    if legacy.price.is_zero() {
+        return Err(ContractError::InvalidPrice {});
+    }
+
+    let usdt_token = deps.api.addr_validate(&msg.usdt_token)?;
+    if usdt_token == legacy.cl8y_token {
+        return Err(ContractError::InvalidTokenConfig {});
+    }
+
+    let price = match msg.price {
+        Some(price) => {
+            if price.is_zero() {
+                return Err(ContractError::InvalidPrice {});
+            }
+            price
+        }
+        None => legacy
+            .price
+            .checked_mul(Uint128::new(LEGACY_PRICE_SCALE))
+            .map_err(|_| ContractError::Overflow {})?,
+    };
+
+    let prior_usdc = TOTAL_USDC_SPENT.may_load(deps.storage)?.unwrap_or_default();
+    TOTAL_USDC_SPENT.remove(deps.storage);
+
+    let config = Config {
+        owner: legacy.owner,
+        cl8y_token: legacy.cl8y_token,
+        usdt_token,
+        destination: legacy.destination,
+        price,
+    };
+    CONFIG.save(deps.storage, &config)?;
+    TOTAL_USDT_SPENT.save(deps.storage, &Uint128::zero())?;
+
+    Ok(Response::new()
+        .add_attribute("action", "migrate")
+        .add_attribute("from_version", from_version)
+        .add_attribute("to_version", CONTRACT_VERSION)
+        .add_attribute("usdt_token", config.usdt_token)
+        .add_attribute("price", price)
+        .add_attribute("prior_usdc_micro", prior_usdc))
+}
+
+fn query_simulate_swap(deps: Deps, usdt_in: Uint128) -> StdResult<SimulateSwapResponse> {
     let config = CONFIG.load(deps.storage)?;
-    let cl8y_out = compute_cl8y_out(usdc_in, config.price)
+    let cl8y_out = compute_cl8y_out(usdt_in, config.price)
         .map_err(|e| StdError::generic_err(e.to_string()))?;
     Ok(SimulateSwapResponse { cl8y_out })
 }
@@ -210,30 +337,14 @@ fn assert_owner(info: &MessageInfo, owner: &cosmwasm_std::Addr) -> Result<(), Co
     Ok(())
 }
 
-fn parse_usdc_funds(funds: &[Coin], expected_denom: &str) -> Result<Uint128, ContractError> {
-    if funds.is_empty() {
-        return Err(ContractError::NoFunds {});
-    }
-    if funds.len() != 1 {
-        return Err(ContractError::InvalidFunds {
-            expected: expected_denom.to_string(),
-        });
-    }
-    let coin = &funds[0];
-    if coin.denom != expected_denom || coin.amount.is_zero() {
-        return Err(ContractError::InvalidFunds {
-            expected: expected_denom.to_string(),
-        });
-    }
-    Ok(coin.amount)
-}
-
-/// cl8y_out = usdc_in_micro * 10^18 / price  (floored)
-pub fn compute_cl8y_out(usdc_in: Uint128, price: Uint128) -> Result<Uint128, ContractError> {
+/// cl8y_out = usdt_in * 10^18 / price  (floored)
+///
+/// `price` is USDT base units (18 decimals) per 1 whole CL8Y.
+pub fn compute_cl8y_out(usdt_in: Uint128, price: Uint128) -> Result<Uint128, ContractError> {
     if price.is_zero() {
         return Err(ContractError::InvalidPrice {});
     }
-    let numerator = Uint256::from(usdc_in) * Uint256::from(CL8Y_UNIT);
+    let numerator = Uint256::from(usdt_in) * Uint256::from(CL8Y_UNIT);
     let out = numerator / Uint256::from(price);
     out.try_into().map_err(|_| ContractError::Overflow {})
 }
@@ -243,30 +354,45 @@ pub fn compute_cl8y_out(usdc_in: Uint128, price: Uint128) -> Result<Uint128, Con
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::LegacyConfig;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{from_json, Addr, ContractResult, QuerierResult, SystemResult, WasmQuery};
+    use cosmwasm_std::{
+        coin, from_json, Addr, ContractResult, QuerierResult, SystemResult, WasmQuery,
+    };
+    use cw20::Cw20ExecuteMsg;
 
     const OWNER: &str = "terra1owner000000000000000000000000000000000";
     const USER: &str = "terra1user00000000000000000000000000000000";
     const DEST: &str = "terra1dest000000000000000000000000000000000";
     const CL8Y: &str = "terra1cl8y00000000000000000000000000000000";
-    const USDC: &str = "ibc/0BB9D8513E8E8E9AE6A9D211D9136E6DA42288DDE6CFAA453A150A4566054DC5";
+    const USDT: &str = "terra1usdt00000000000000000000000000000000";
 
     fn default_instantiate_msg() -> InstantiateMsg {
         InstantiateMsg {
             owner: OWNER.to_string(),
             cl8y_token: CL8Y.to_string(),
-            usdc_denom: USDC.to_string(),
+            usdt_token: USDT.to_string(),
             destination: DEST.to_string(),
             price: None,
         }
     }
 
-    fn setup(deps: DepsMut, cl8y_balance: u128) {
-        instantiate(deps, mock_env(), mock_info("creator", &[]), default_instantiate_msg())
-            .unwrap();
-        // mock querier will be set per-test
-        let _ = cl8y_balance;
+    fn setup(deps: DepsMut) {
+        instantiate(
+            deps,
+            mock_env(),
+            mock_info("creator", &[]),
+            default_instantiate_msg(),
+        )
+        .unwrap();
+    }
+
+    fn swap_msg(amount: u128) -> ExecuteMsg {
+        ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: USER.to_string(),
+            amount: Uint128::new(amount),
+            msg: to_json_binary(&Cw20HookMsg::Swap {}).unwrap(),
+        })
     }
 
     fn mock_cl8y_balance(balance: u128) -> impl Fn(&WasmQuery) -> QuerierResult {
@@ -302,87 +428,106 @@ mod tests {
         .unwrap();
         let config = CONFIG.load(&deps.storage).unwrap();
         assert_eq!(config.price, Uint128::from(DEFAULT_PRICE));
+        assert_eq!(DEFAULT_PRICE, 7 * 10u128.pow(17));
         assert_eq!(config.owner, Addr::unchecked(OWNER));
-        assert_eq!(TOTAL_USDC_SPENT.load(&deps.storage).unwrap(), Uint128::zero());
+        assert_eq!(config.usdt_token, Addr::unchecked(USDT));
+        assert_eq!(
+            TOTAL_USDT_SPENT.load(&deps.storage).unwrap(),
+            Uint128::zero()
+        );
     }
 
     #[test]
-    fn compute_cl8y_out_zero_usdc() {
-        let out = compute_cl8y_out(Uint128::zero(), Uint128::new(700_000)).unwrap();
+    fn instantiate_rejects_same_payment_and_reward_token() {
+        let mut deps = mock_dependencies();
+        let mut msg = default_instantiate_msg();
+        msg.usdt_token = CL8Y.to_string();
+        let err =
+            instantiate(deps.as_mut(), mock_env(), mock_info("creator", &[]), msg).unwrap_err();
+        assert_eq!(err, ContractError::InvalidTokenConfig {});
+    }
+
+    #[test]
+    fn compute_cl8y_out_zero_usdt() {
+        let out = compute_cl8y_out(Uint128::zero(), Uint128::new(DEFAULT_PRICE)).unwrap();
         assert_eq!(out, Uint128::zero());
     }
 
     #[test]
     fn compute_cl8y_out_zero_price_errors() {
-        let err = compute_cl8y_out(Uint128::new(700_000), Uint128::zero()).unwrap_err();
+        let err = compute_cl8y_out(Uint128::new(DEFAULT_PRICE), Uint128::zero()).unwrap_err();
         assert_eq!(err, ContractError::InvalidPrice {});
     }
 
     #[test]
     fn compute_cl8y_out_one_cl8y() {
-        // 0.70 USDC = 700_000 micro -> 1 CL8Y
-        let out = compute_cl8y_out(Uint128::new(700_000), Uint128::new(700_000)).unwrap();
+        // 0.70 USDT = 7e17 base units -> 1 CL8Y
+        let out =
+            compute_cl8y_out(Uint128::new(DEFAULT_PRICE), Uint128::new(DEFAULT_PRICE)).unwrap();
         assert_eq!(out, Uint128::new(CL8Y_UNIT));
     }
 
     #[test]
     fn compute_cl8y_out_rounding() {
-        // 1 micro-USDC at price 700_000 -> floor(1e18 / 700_000)
-        let out = compute_cl8y_out(Uint128::one(), Uint128::new(700_000)).unwrap();
-        assert_eq!(out, Uint128::new(1_428_571_428_571));
+        // 1 base unit at default price -> floor(1e18 / 7e17) = 1
+        let out = compute_cl8y_out(Uint128::one(), Uint128::new(DEFAULT_PRICE)).unwrap();
+        assert_eq!(out, Uint128::one());
     }
 
     #[test]
-    fn compute_cl8y_out_one_usdc_at_default_price() {
-        // 1 USDC = 1_000_000 micro -> ~1.428571 CL8Y
-        let out = compute_cl8y_out(Uint128::new(1_000_000), Uint128::new(700_000)).unwrap();
+    fn compute_cl8y_out_one_usdt_at_default_price() {
+        // 1 USDT = 1e18 base units -> ~1.428571 CL8Y
+        let out = compute_cl8y_out(Uint128::new(CL8Y_UNIT), Uint128::new(DEFAULT_PRICE)).unwrap();
         assert_eq!(out, Uint128::new(1_428_571_428_571_428_571));
     }
 
     #[test]
-    fn compute_cl8y_out_ten_cl8y_for_seven_usdc() {
-        // 7 USDC at 0.70/CL8Y -> exactly 10 CL8Y
-        let out = compute_cl8y_out(Uint128::new(7_000_000), Uint128::new(700_000)).unwrap();
+    fn compute_cl8y_out_ten_cl8y_for_seven_usdt() {
+        // 7 USDT at 0.70/CL8Y -> exactly 10 CL8Y
+        let out =
+            compute_cl8y_out(Uint128::new(CL8Y_UNIT * 7), Uint128::new(DEFAULT_PRICE)).unwrap();
         assert_eq!(out, Uint128::new(CL8Y_UNIT * 10));
     }
 
     #[test]
-    fn compute_cl8y_out_one_usdc_per_cl8y_price() {
-        // price = 1_000_000 micro-USDC (1 USDC per CL8Y)
-        let out = compute_cl8y_out(Uint128::new(1_000_000), Uint128::new(1_000_000)).unwrap();
+    fn compute_cl8y_out_one_usdt_per_cl8y_price() {
+        // price = 1e18 (1 USDT per CL8Y)
+        let out = compute_cl8y_out(Uint128::new(CL8Y_UNIT), Uint128::new(CL8Y_UNIT)).unwrap();
         assert_eq!(out, Uint128::new(CL8Y_UNIT));
     }
 
     #[test]
     fn compute_cl8y_out_floors_just_below_one_cl8y() {
-        // 699_999 micro < 700_000 price -> still less than 1 whole CL8Y
-        let out = compute_cl8y_out(Uint128::new(699_999), Uint128::new(700_000)).unwrap();
-        assert_eq!(out, Uint128::new(999_998_571_428_571_428));
+        // 10^18 is not divisible by the price, so one base unit under the price
+        // floors two base units short of 1 CL8Y.
+        let out =
+            compute_cl8y_out(Uint128::new(DEFAULT_PRICE - 1), Uint128::new(DEFAULT_PRICE)).unwrap();
+        assert_eq!(out, Uint128::new(CL8Y_UNIT - 2));
         assert!(out < Uint128::new(CL8Y_UNIT));
     }
 
     #[test]
     fn compute_cl8y_out_just_above_one_cl8y() {
-        let out = compute_cl8y_out(Uint128::new(700_001), Uint128::new(700_000)).unwrap();
-        assert_eq!(out, Uint128::new(1_000_001_428_571_428_571));
+        let out =
+            compute_cl8y_out(Uint128::new(DEFAULT_PRICE + 1), Uint128::new(DEFAULT_PRICE)).unwrap();
+        assert_eq!(out, Uint128::new(CL8Y_UNIT + 1));
         assert!(out > Uint128::new(CL8Y_UNIT));
     }
 
     #[test]
-    fn compute_cl8y_out_scales_linearly_with_usdc() {
-        let price = Uint128::new(700_000);
-        let one = compute_cl8y_out(Uint128::new(700_000), price).unwrap();
-        let two = compute_cl8y_out(Uint128::new(1_400_000), price).unwrap();
+    fn compute_cl8y_out_scales_linearly_with_usdt() {
+        let price = Uint128::new(DEFAULT_PRICE);
+        let one = compute_cl8y_out(Uint128::new(DEFAULT_PRICE), price).unwrap();
+        let two = compute_cl8y_out(Uint128::new(DEFAULT_PRICE * 2), price).unwrap();
         assert_eq!(two, one + one);
     }
 
     #[test]
     fn compute_cl8y_out_inverse_n_cl8y_costs_n_times_price() {
-        // Buying N whole CL8Y costs exactly N * price micro-USDC (no rounding loss).
-        let price = Uint128::new(700_000);
+        let price = Uint128::new(DEFAULT_PRICE);
         for n in 1u128..=20 {
-            let usdc = Uint128::new(n * 700_000);
-            let out = compute_cl8y_out(usdc, price).unwrap();
+            let usdt = Uint128::new(n * DEFAULT_PRICE);
+            let out = compute_cl8y_out(usdt, price).unwrap();
             assert_eq!(out, Uint128::new(n * CL8Y_UNIT), "failed at n={n}");
         }
     }
@@ -390,38 +535,36 @@ mod tests {
     #[test]
     fn compute_cl8y_out_various_prices() {
         let cases: &[(u128, u128, u128)] = &[
-            // (usdc_micro, price_micro, expected_cl8y_base)
-            (700_000, 700_000, CL8Y_UNIT),
-            (1_000_000, 1_000_000, CL8Y_UNIT),
-            (500_000, 1_000_000, CL8Y_UNIT / 2),
-            (2_000_000, 500_000, CL8Y_UNIT * 4),
-            (3, 2, CL8Y_UNIT * 3 / 2), // price = 2 micro-USDC per CL8Y
+            (DEFAULT_PRICE, DEFAULT_PRICE, CL8Y_UNIT),
+            (CL8Y_UNIT, CL8Y_UNIT, CL8Y_UNIT),
+            (CL8Y_UNIT / 2, CL8Y_UNIT, CL8Y_UNIT / 2),
+            (CL8Y_UNIT * 4, CL8Y_UNIT / 2, CL8Y_UNIT * 8),
+            (3, 2, CL8Y_UNIT * 3 / 2),
         ];
-        for (usdc, price, expected) in cases {
-            let out = compute_cl8y_out(Uint128::new(*usdc), Uint128::new(*price)).unwrap();
-            assert_eq!(out, Uint128::new(*expected), "usdc={usdc} price={price}");
+        for (usdt, price, expected) in cases {
+            let out = compute_cl8y_out(Uint128::new(*usdt), Uint128::new(*price)).unwrap();
+            assert_eq!(out, Uint128::new(*expected), "usdt={usdt} price={price}");
         }
     }
 
     #[test]
     fn compute_cl8y_out_overflow_when_result_exceeds_u128() {
-        // usdc * 10^18 / price must fit in Uint128
         let err = compute_cl8y_out(Uint128::MAX, Uint128::one()).unwrap_err();
         assert_eq!(err, ContractError::Overflow {});
     }
 
     #[test]
     fn compute_cl8y_out_large_realistic_swap() {
-        // 1_000_000 USDC (1e12 micro) at default price
-        let out = compute_cl8y_out(Uint128::new(1_000_000_000_000), Uint128::new(700_000)).unwrap();
-        // 1e12 * 1e18 / 700_000 = 1e30 / 7e5 ≈ 1.428571e24 base units ≈ 1.428571e6 CL8Y
+        // 1_000_000 USDT at default price
+        let usdt_in = Uint128::new(1_000_000) * Uint128::new(CL8Y_UNIT);
+        let out = compute_cl8y_out(usdt_in, Uint128::new(DEFAULT_PRICE)).unwrap();
         assert_eq!(out, Uint128::new(1_428_571_428_571_428_571_428_571));
     }
 
     #[test]
     fn update_rate_owner_only() {
         let mut deps = mock_dependencies();
-        setup(deps.as_mut(), 0);
+        setup(deps.as_mut());
 
         let err = execute(
             deps.as_mut(),
@@ -452,7 +595,7 @@ mod tests {
     #[test]
     fn update_destination_owner_only() {
         let mut deps = mock_dependencies();
-        setup(deps.as_mut(), 0);
+        setup(deps.as_mut());
 
         let new_dest = "terra1newdest000000000000000000000000000";
         execute(
@@ -474,109 +617,322 @@ mod tests {
     fn swap_success() {
         let mut deps = mock_dependencies();
         deps.querier.update_wasm(mock_cl8y_balance(CL8Y_UNIT * 10));
-        setup(deps.as_mut(), CL8Y_UNIT * 10);
+        setup(deps.as_mut());
 
-        let usdc = Coin {
-            denom: USDC.to_string(),
-            amount: Uint128::new(700_000),
-        };
         let res = execute(
             deps.as_mut(),
             mock_env(),
-            mock_info(USER, &[usdc]),
-            ExecuteMsg::Swap {},
+            mock_info(USDT, &[]),
+            swap_msg(DEFAULT_PRICE),
         )
         .unwrap();
 
         assert_eq!(res.messages.len(), 2);
+        match &res.messages[0].msg {
+            cosmwasm_std::CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr,
+                msg,
+                funds,
+            }) => {
+                assert_eq!(contract_addr, CL8Y);
+                assert!(funds.is_empty());
+                let parsed: Cw20ExecuteMsg = from_json(msg).unwrap();
+                match parsed {
+                    Cw20ExecuteMsg::Transfer { recipient, amount } => {
+                        assert_eq!(recipient, USER);
+                        assert_eq!(amount, Uint128::new(CL8Y_UNIT));
+                    }
+                    _ => panic!("expected CL8Y transfer"),
+                }
+            }
+            _ => panic!("expected wasm execute"),
+        }
+        match &res.messages[1].msg {
+            cosmwasm_std::CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr,
+                msg,
+                funds,
+            }) => {
+                assert_eq!(contract_addr, USDT);
+                assert!(funds.is_empty());
+                let parsed: Cw20ExecuteMsg = from_json(msg).unwrap();
+                match parsed {
+                    Cw20ExecuteMsg::Transfer { recipient, amount } => {
+                        assert_eq!(recipient, DEST);
+                        assert_eq!(amount, Uint128::new(DEFAULT_PRICE));
+                    }
+                    _ => panic!("expected USDT transfer"),
+                }
+            }
+            _ => panic!("expected wasm execute"),
+        }
         assert_eq!(
-            TOTAL_USDC_SPENT.load(&deps.storage).unwrap(),
-            Uint128::new(700_000)
+            TOTAL_USDT_SPENT.load(&deps.storage).unwrap(),
+            Uint128::new(DEFAULT_PRICE)
         );
+    }
+
+    #[test]
+    fn swap_rejects_sender_other_than_usdt_token() {
+        let mut deps = mock_dependencies();
+        deps.querier.update_wasm(mock_cl8y_balance(CL8Y_UNIT));
+        setup(deps.as_mut());
+
+        let err = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(USER, &[]),
+            swap_msg(DEFAULT_PRICE),
+        )
+        .unwrap_err();
+        assert_eq!(err, ContractError::Unauthorized {});
+    }
+
+    #[test]
+    fn swap_rejects_native_funds() {
+        let mut deps = mock_dependencies();
+        deps.querier.update_wasm(mock_cl8y_balance(CL8Y_UNIT));
+        setup(deps.as_mut());
+
+        let err = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(USDT, &[coin(1, "uluna")]),
+            swap_msg(DEFAULT_PRICE),
+        )
+        .unwrap_err();
+        assert_eq!(err, ContractError::UnexpectedFunds {});
+    }
+
+    #[test]
+    fn swap_rejects_invalid_hook() {
+        let mut deps = mock_dependencies();
+        deps.querier.update_wasm(mock_cl8y_balance(CL8Y_UNIT));
+        setup(deps.as_mut());
+
+        let err = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(USDT, &[]),
+            ExecuteMsg::Receive(Cw20ReceiveMsg {
+                sender: USER.to_string(),
+                amount: Uint128::new(DEFAULT_PRICE),
+                msg: to_json_binary(&"nope").unwrap(),
+            }),
+        )
+        .unwrap_err();
+        assert_eq!(err, ContractError::InvalidHook {});
+    }
+
+    #[test]
+    fn swap_rejects_zero_amount() {
+        let mut deps = mock_dependencies();
+        deps.querier.update_wasm(mock_cl8y_balance(CL8Y_UNIT));
+        setup(deps.as_mut());
+
+        let err =
+            execute(deps.as_mut(), mock_env(), mock_info(USDT, &[]), swap_msg(0)).unwrap_err();
+        assert_eq!(err, ContractError::NoFunds {});
     }
 
     #[test]
     fn swap_insufficient_cl8y() {
         let mut deps = mock_dependencies();
         deps.querier.update_wasm(mock_cl8y_balance(0));
-        setup(deps.as_mut(), 0);
+        setup(deps.as_mut());
 
-        let usdc = Coin {
-            denom: USDC.to_string(),
-            amount: Uint128::new(700_000),
-        };
         let err = execute(
             deps.as_mut(),
             mock_env(),
-            mock_info(USER, &[usdc]),
-            ExecuteMsg::Swap {},
+            mock_info(USDT, &[]),
+            swap_msg(DEFAULT_PRICE),
         )
         .unwrap_err();
         assert_eq!(err, ContractError::InsufficientCl8y {});
     }
 
     #[test]
-    fn swap_no_funds() {
-        let mut deps = mock_dependencies();
-        deps.querier.update_wasm(mock_cl8y_balance(CL8Y_UNIT));
-        setup(deps.as_mut(), CL8Y_UNIT);
-
-        let err = execute(
-            deps.as_mut(),
-            mock_env(),
-            mock_info(USER, &[]),
-            ExecuteMsg::Swap {},
-        )
-        .unwrap_err();
-        assert_eq!(err, ContractError::NoFunds {});
-    }
-
-    #[test]
-    fn swap_wrong_denom() {
-        let mut deps = mock_dependencies();
-        deps.querier.update_wasm(mock_cl8y_balance(CL8Y_UNIT));
-        setup(deps.as_mut(), CL8Y_UNIT);
-
-        let err = execute(
-            deps.as_mut(),
-            mock_env(),
-            mock_info(USER, &[Coin::new(100, "uluna")]),
-            ExecuteMsg::Swap {},
-        )
-        .unwrap_err();
-        assert!(matches!(err, ContractError::InvalidFunds { .. }));
-    }
-
-    #[test]
     fn simulate_swap_query() {
         let mut deps = mock_dependencies();
-        setup(deps.as_mut(), 0);
+        setup(deps.as_mut());
 
         let res = query(
             deps.as_ref(),
             mock_env(),
             QueryMsg::SimulateSwap {
-                usdc_in: Uint128::new(700_000),
+                usdt_in: Uint128::new(DEFAULT_PRICE),
             },
         )
         .unwrap();
         let sim: SimulateSwapResponse = from_json(&res).unwrap();
         assert_eq!(sim.cl8y_out, Uint128::new(CL8Y_UNIT));
     }
+
+    fn setup_legacy(deps: DepsMut, price: u128, usdc_spent: u128) {
+        set_contract_version(deps.storage, CONTRACT_NAME, "0.1.0").unwrap();
+        LEGACY_CONFIG
+            .save(
+                deps.storage,
+                &LegacyConfig {
+                    owner: Addr::unchecked(OWNER),
+                    cl8y_token: Addr::unchecked(CL8Y),
+                    usdc_denom: NOBLE_USDC_DENOM.to_string(),
+                    destination: Addr::unchecked(DEST),
+                    price: Uint128::new(price),
+                },
+            )
+            .unwrap();
+        TOTAL_USDC_SPENT
+            .save(deps.storage, &Uint128::new(usdc_spent))
+            .unwrap();
+    }
+
+    fn migrate_msg() -> MigrateMsg {
+        MigrateMsg {
+            usdt_token: USDT.to_string(),
+            price: None,
+        }
+    }
+
+    #[test]
+    fn migrate_scales_live_noble_price_and_keeps_address_state() {
+        let mut deps = mock_dependencies();
+        // On-chain values from terra1e6c... on 2026-09-22.
+        let live_price = 711_700u128;
+        let live_spent = 2_695_278_851u128;
+        setup_legacy(deps.as_mut(), live_price, live_spent);
+
+        let res = migrate(deps.as_mut(), mock_env(), migrate_msg()).unwrap();
+        assert_eq!(res.attributes[0].value, "migrate");
+
+        let config = CONFIG.load(&deps.storage).unwrap();
+        assert_eq!(config.owner, Addr::unchecked(OWNER));
+        assert_eq!(config.cl8y_token, Addr::unchecked(CL8Y));
+        assert_eq!(config.destination, Addr::unchecked(DEST));
+        assert_eq!(config.usdt_token, Addr::unchecked(USDT));
+        assert_eq!(
+            config.price,
+            Uint128::new(live_price) * Uint128::new(LEGACY_PRICE_SCALE)
+        );
+        assert_eq!(
+            TOTAL_USDT_SPENT.load(&deps.storage).unwrap(),
+            Uint128::zero()
+        );
+        assert!(TOTAL_USDC_SPENT.may_load(&deps.storage).unwrap().is_none());
+
+        let version = cw2::get_contract_version(&deps.storage).unwrap();
+        assert_eq!(version.contract, CONTRACT_NAME);
+        assert_eq!(version.version, "0.2.0");
+    }
+
+    #[test]
+    fn migrate_then_swap_uses_scaled_price() {
+        let mut deps = mock_dependencies();
+        deps.querier.update_wasm(mock_cl8y_balance(CL8Y_UNIT));
+        let live_price = 711_700u128;
+        setup_legacy(deps.as_mut(), live_price, 0);
+        migrate(deps.as_mut(), mock_env(), migrate_msg()).unwrap();
+
+        let usdt_in = Uint128::new(live_price) * Uint128::new(LEGACY_PRICE_SCALE);
+        let res = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(USDT, &[]),
+            ExecuteMsg::Receive(Cw20ReceiveMsg {
+                sender: USER.to_string(),
+                amount: usdt_in,
+                msg: to_json_binary(&Cw20HookMsg::Swap {}).unwrap(),
+            }),
+        )
+        .unwrap();
+
+        match &res.messages[0].msg {
+            cosmwasm_std::CosmosMsg::Wasm(WasmMsg::Execute { msg, .. }) => {
+                let parsed: Cw20ExecuteMsg = from_json(msg).unwrap();
+                match parsed {
+                    Cw20ExecuteMsg::Transfer { amount, .. } => {
+                        assert_eq!(amount, Uint128::new(CL8Y_UNIT));
+                    }
+                    _ => panic!("expected CL8Y transfer"),
+                }
+            }
+            _ => panic!("expected wasm execute"),
+        }
+    }
+
+    #[test]
+    fn migrate_explicit_price_overrides_scale() {
+        let mut deps = mock_dependencies();
+        setup_legacy(deps.as_mut(), 711_700, 0);
+        migrate(
+            deps.as_mut(),
+            mock_env(),
+            MigrateMsg {
+                usdt_token: USDT.to_string(),
+                price: Some(Uint128::new(DEFAULT_PRICE)),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            CONFIG.load(&deps.storage).unwrap().price,
+            Uint128::new(DEFAULT_PRICE)
+        );
+    }
+
+    #[test]
+    fn migrate_rejects_second_run() {
+        let mut deps = mock_dependencies();
+        setup_legacy(deps.as_mut(), 711_700, 0);
+        migrate(deps.as_mut(), mock_env(), migrate_msg()).unwrap();
+        let err = migrate(deps.as_mut(), mock_env(), migrate_msg()).unwrap_err();
+        assert_eq!(err, ContractError::AlreadyMigrated {});
+    }
+
+    #[test]
+    fn migrate_rejects_fresh_usdt_contract() {
+        let mut deps = mock_dependencies();
+        setup(deps.as_mut());
+        let err = migrate(deps.as_mut(), mock_env(), migrate_msg()).unwrap_err();
+        assert_eq!(err, ContractError::AlreadyMigrated {});
+    }
+
+    #[test]
+    fn migrate_rejects_wrong_legacy_denom() {
+        let mut deps = mock_dependencies();
+        setup_legacy(deps.as_mut(), 711_700, 0);
+        let mut legacy = LEGACY_CONFIG.load(&deps.storage).unwrap();
+        legacy.usdc_denom = "uluna".to_string();
+        LEGACY_CONFIG.save(&mut deps.storage, &legacy).unwrap();
+
+        let err = migrate(deps.as_mut(), mock_env(), migrate_msg()).unwrap_err();
+        assert_eq!(err, ContractError::UnexpectedLegacyDenom {});
+    }
+
+    #[test]
+    fn migrate_rejects_unsupported_version() {
+        let mut deps = mock_dependencies();
+        setup_legacy(deps.as_mut(), 711_700, 0);
+        set_contract_version(&mut deps.storage, CONTRACT_NAME, "0.0.9").unwrap();
+        let err = migrate(deps.as_mut(), mock_env(), migrate_msg()).unwrap_err();
+        assert_eq!(
+            err,
+            ContractError::UnsupportedVersion {
+                version: "0.0.9".to_string(),
+            }
+        );
+    }
 }
 
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    use cosmwasm_std::coin;
     use cosmwasm_std::Addr;
     use cw20_base::msg::{ExecuteMsg as Cw20ExecuteMsgBase, InstantiateMsg as Cw20InstantiateMsg};
-    use cw_multi_test::{App, BankSudo, ContractWrapper, Executor, SudoMsg};
+    use cw_multi_test::{App, ContractWrapper, Executor};
 
     const OWNER: &str = "terra1owner000000000000000000000000000000000";
     const USER: &str = "terra1user00000000000000000000000000000000";
     const DEST: &str = "terra1dest000000000000000000000000000000000";
-    const USDC: &str = "ibc/0BB9D8513E8E8E9AE6A9D211D9136E6DA42288DDE6CFAA453A150A4566054DC5";
 
     fn otc_contract() -> Box<dyn cw_multi_test::Contract<cosmwasm_std::Empty>> {
         let contract = ContractWrapper::new(execute, instantiate, query);
@@ -596,6 +952,7 @@ mod integration_tests {
         app: App,
         otc: Addr,
         cl8y: Addr,
+        usdt: Addr,
     }
 
     fn setup_integration() -> TestEnv {
@@ -623,6 +980,27 @@ mod integration_tests {
             )
             .unwrap();
 
+        let usdt = app
+            .instantiate_contract(
+                cw20_id,
+                Addr::unchecked(OWNER),
+                &Cw20InstantiateMsg {
+                    name: "Tether USD".to_string(),
+                    symbol: "USDT".to_string(),
+                    decimals: 18,
+                    initial_balances: vec![cw20::Cw20Coin {
+                        address: USER.to_string(),
+                        amount: Uint128::new(CL8Y_UNIT * 10),
+                    }],
+                    mint: None,
+                    marketing: None,
+                },
+                &[],
+                "usdt",
+                None,
+            )
+            .unwrap();
+
         let otc_id = app.store_code(otc_contract());
         let otc = app
             .instantiate_contract(
@@ -631,7 +1009,7 @@ mod integration_tests {
                 &InstantiateMsg {
                     owner: OWNER.to_string(),
                     cl8y_token: cl8y.to_string(),
-                    usdc_denom: USDC.to_string(),
+                    usdt_token: usdt.to_string(),
                     destination: DEST.to_string(),
                     price: None,
                 },
@@ -641,7 +1019,6 @@ mod integration_tests {
             )
             .unwrap();
 
-        // Fund OTC with CL8Y
         app.execute_contract(
             Addr::unchecked(OWNER),
             cl8y.clone(),
@@ -653,28 +1030,35 @@ mod integration_tests {
         )
         .unwrap();
 
-        // Fund user with USDC
-        app.sudo(SudoMsg::Bank(BankSudo::Mint {
-            to_address: USER.to_string(),
-            amount: vec![coin(10_000_000, USDC)], // 10 USDC
-        }))
-        .unwrap();
+        TestEnv {
+            app,
+            otc,
+            cl8y,
+            usdt,
+        }
+    }
 
-        TestEnv { app, otc, cl8y }
+    fn send_usdt(
+        env: &mut TestEnv,
+        amount: u128,
+    ) -> Result<cw_multi_test::AppResponse, cw_multi_test::error::AnyError> {
+        env.app.execute_contract(
+            Addr::unchecked(USER),
+            env.usdt.clone(),
+            &Cw20ExecuteMsgBase::Send {
+                contract: env.otc.to_string(),
+                amount: Uint128::new(amount),
+                msg: to_json_binary(&Cw20HookMsg::Swap {}).unwrap(),
+            },
+            &[],
+        )
     }
 
     #[test]
-    fn integration_swap_forwards_usdc_and_mints_cl8y() {
+    fn integration_swap_forwards_usdt_and_sends_cl8y() {
         let mut env = setup_integration();
 
-        env.app
-            .execute_contract(
-                Addr::unchecked(USER),
-                env.otc.clone(),
-                &ExecuteMsg::Swap {},
-                &[coin(700_000, USDC)],
-            )
-            .unwrap();
+        send_usdt(&mut env, DEFAULT_PRICE).unwrap();
 
         let user_cl8y: cw20::BalanceResponse = env
             .app
@@ -688,22 +1072,45 @@ mod integration_tests {
             .unwrap();
         assert_eq!(user_cl8y.balance, Uint128::new(CL8Y_UNIT));
 
-        let dest_usdc = env.app.wrap().query_balance(DEST, USDC).unwrap();
-        assert_eq!(dest_usdc.amount, Uint128::new(700_000));
+        let dest_usdt: cw20::BalanceResponse = env
+            .app
+            .wrap()
+            .query_wasm_smart(
+                env.usdt.clone(),
+                &Cw20QueryMsg::Balance {
+                    address: DEST.to_string(),
+                },
+            )
+            .unwrap();
+        assert_eq!(dest_usdt.balance, Uint128::new(DEFAULT_PRICE));
+
+        let user_usdt: cw20::BalanceResponse = env
+            .app
+            .wrap()
+            .query_wasm_smart(
+                env.usdt.clone(),
+                &Cw20QueryMsg::Balance {
+                    address: USER.to_string(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            user_usdt.balance,
+            Uint128::new(CL8Y_UNIT * 10 - DEFAULT_PRICE)
+        );
 
         let total: Uint128 = env
             .app
             .wrap()
-            .query_wasm_smart(env.otc.clone(), &QueryMsg::TotalUsdcSpent {})
+            .query_wasm_smart(env.otc.clone(), &QueryMsg::TotalUsdtSpent {})
             .unwrap();
-        assert_eq!(total, Uint128::new(700_000));
+        assert_eq!(total, Uint128::new(DEFAULT_PRICE));
     }
 
     #[test]
     fn integration_swap_reverts_insufficient_cl8y() {
         let mut env = setup_integration();
 
-        // Drain CL8Y from OTC
         let otc_balance: cw20::BalanceResponse = env
             .app
             .wrap()
@@ -725,15 +1132,7 @@ mod integration_tests {
             )
             .unwrap();
 
-        let err = env
-            .app
-            .execute_contract(
-                Addr::unchecked(USER),
-                env.otc.clone(),
-                &ExecuteMsg::Swap {},
-                &[coin(700_000, USDC)],
-            )
-            .unwrap_err();
+        let err = send_usdt(&mut env, DEFAULT_PRICE).unwrap_err();
         assert!(err.root_cause().to_string().contains("Insufficient CL8Y"));
     }
 }

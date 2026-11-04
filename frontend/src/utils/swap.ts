@@ -1,28 +1,29 @@
 import { CL8Y_UNIT } from './constants';
 
 /**
- * Compute CL8Y output from USDC input (micro units).
- * cl8y_out = usdc_in_micro * 10^18 / price (floored)
+ * Compute CL8Y output from USDT input (18-decimal base units).
+ * cl8y_out = usdt_in * 10^18 / price (floored)
+ * price is USDT base units per 1 whole CL8Y.
  */
-export function computeCl8yOut(usdcInMicro: string, priceMicro: string): bigint {
-  const usdc = BigInt(usdcInMicro || '0');
-  const price = BigInt(priceMicro || '0');
-  if (usdc <= 0n || price <= 0n) return 0n;
-  return (usdc * CL8Y_UNIT) / price;
+export function computeCl8yOut(usdtIn: string, price: string): bigint {
+  const usdt = BigInt(usdtIn || '0');
+  const rate = BigInt(price || '0');
+  if (usdt <= 0n || rate <= 0n) return 0n;
+  return (usdt * CL8Y_UNIT) / rate;
 }
 
-/** Human-readable CL8Y price in USDC (e.g. 0.70) */
-export function priceToUsdcDisplay(priceMicro: string): string {
-  const p = BigInt(priceMicro || '0');
+/** Human-readable CL8Y price in USDT (e.g. 0.70) */
+export function priceToUsdtDisplay(priceBase: string): string {
+  const p = BigInt(priceBase || '0');
   if (p <= 0n) return '0';
-  const whole = p / 1_000_000n;
-  const frac = (p % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '');
+  const whole = p / CL8Y_UNIT;
+  const frac = (p % CL8Y_UNIT).toString().padStart(18, '0').replace(/0+$/, '');
   return frac ? `${whole}.${frac}` : whole.toString();
 }
 
-/** CL8Y received per 1 USDC at given price */
-export function cl8yPerUsdc(priceMicro: string): string {
-  const out = computeCl8yOut('1000000', priceMicro);
+/** CL8Y received per 1 USDT at the given price */
+export function cl8yPerUsdt(priceBase: string): string {
+  const out = computeCl8yOut(CL8Y_UNIT.toString(), priceBase);
   const whole = out / CL8Y_UNIT;
   const frac = (out % CL8Y_UNIT).toString().padStart(18, '0').replace(/0+$/, '');
   return frac ? `${whole}.${frac}` : whole.toString();

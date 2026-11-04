@@ -10,7 +10,7 @@ export function Header() {
           </div>
           <div>
             <h1 className="text-lg font-bold text-white">CL8Y OTC</h1>
-            <p className="text-xs text-gray-500 hidden sm:block">USDC → CL8Y on Terra Classic</p>
+            <p className="text-xs text-gray-500 hidden sm:block">USDT → CL8Y on Terra Classic</p>
           </div>
         </div>
         <WalletButton />

@@ -9,7 +9,6 @@ import {
   LCD_CONFIG,
   NETWORKS,
   TOKENS,
-  USDC_DENOM,
 } from '../utils/constants';
 import { executeContractWithCoins } from './wallet';
 import { computeCl8yOut } from '../utils/swap';
@@ -20,7 +19,7 @@ const DEV_MODE = import.meta.env.VITE_DEV_MODE === 'true';
 const MOCK_CONFIG: OtcConfig = {
   owner: import.meta.env.VITE_MOCK_OWNER || 'terra1mockowner000000000000000000000000',
   cl8y_token: TOKENS.cl8y.address,
-  usdc_denom: USDC_DENOM,
+  usdt_token: TOKENS.usdt.address,
   destination: 'terra1mockdest000000000000000000000000000',
   price: DEFAULT_PRICE,
 };
@@ -78,41 +77,30 @@ class ContractService {
     return this.queryContract<OtcConfig>(addr, { config: {} });
   }
 
-  async getTotalUsdcSpent(): Promise<string> {
+  async getTotalUsdtSpent(): Promise<string> {
     if (DEV_MODE && !this.getOtcAddress()) return '0';
     const addr = this.getOtcAddress();
     if (!addr) return '0';
-    return this.queryContract<string>(addr, { total_usdc_spent: {} });
+    return this.queryContract<string>(addr, { total_usdt_spent: {} });
   }
 
-  async simulateSwap(usdcIn: string): Promise<string> {
+  async simulateSwap(usdtIn: string): Promise<string> {
     if (DEV_MODE && !this.getOtcAddress()) {
-      return computeCl8yOut(usdcIn, MOCK_CONFIG.price).toString();
+      return computeCl8yOut(usdtIn, MOCK_CONFIG.price).toString();
     }
     const addr = this.getOtcAddress();
     if (!addr) throw new Error('OTC contract address not configured');
     const res = await this.queryContract<SimulateSwapResponse>(addr, {
-      simulate_swap: { usdc_in: usdcIn },
+      simulate_swap: { usdt_in: usdtIn },
     });
     return res.cl8y_out;
   }
 
-  async getNativeBalance(address: string, denom: string): Promise<string> {
-    if (DEV_MODE) {
-      if (denom === USDC_DENOM) return '5000000';
-      return '0';
-    }
-    const path = `/cosmos/bank/v1beta1/balances/${address}/by_denom?denom=${encodeURIComponent(denom)}`;
-    try {
-      const res = await this.fetchLcd<{ balance: { amount: string } }>(path);
-      return res.balance?.amount || '0';
-    } catch {
-      return '0';
-    }
-  }
-
   async getCw20Balance(tokenAddress: string, walletAddress: string): Promise<string> {
-    if (DEV_MODE) return '10000000000000000000';
+    if (DEV_MODE) {
+      if (tokenAddress === TOKENS.usdt.address) return '5000000000000000000';
+      return '10000000000000000000';
+    }
     const res = await this.queryContract<Cw20Balance>(tokenAddress, {
       balance: { address: walletAddress },
     });
@@ -126,15 +114,24 @@ class ContractService {
     return this.getCw20Balance(config.cl8y_token, otcAddress);
   }
 
-  async executeSwap(usdcAmountMicro: string): Promise<{ txHash: string }> {
+  async executeSwap(usdtAmount: string): Promise<{ txHash: string }> {
     if (DEV_MODE && !this.getOtcAddress()) {
       return { txHash: 'MOCK_TX_HASH' };
     }
     const addr = this.getOtcAddress();
     if (!addr) throw new Error('OTC contract address not configured');
-    return executeContractWithCoins(addr, { swap: {} }, [
-      { denom: USDC_DENOM, amount: usdcAmountMicro },
-    ]);
+    const hook = btoa(JSON.stringify({ swap: {} }));
+    return executeContractWithCoins(
+      TOKENS.usdt.address,
+      {
+        send: {
+          contract: addr,
+          amount: usdtAmount,
+          msg: hook,
+        },
+      },
+      []
+    );
   }
 
   async updateRate(price: string): Promise<{ txHash: string }> {
